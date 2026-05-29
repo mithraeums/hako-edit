@@ -16,27 +16,39 @@ permissions:
 
 jobs:
   build:
-    name: build (${{ matrix.os }})
+    name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - name: linux-x86_64
+            os: ubuntu-latest
             platform: linux
-            artifact: hake-linux.tar.gz
-            staging: hake-linux
-            sha: hake-linux.sha256
-          - os: macos-latest
+            artifact: hake-linux-x86_64.tar.gz
+            staging: hake-linux-x86_64
+            sha: hake-linux-x86_64.sha256
+
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            platform: linux
+            artifact: hake-linux-arm64.tar.gz
+            staging: hake-linux-arm64
+            sha: hake-linux-arm64.sha256
+
+          - name: macos-universal
+            os: macos-latest
             platform: macos
-            artifact: hake-macos.tar.gz
-            staging: hake-macos
-            sha: hake-macos.sha256
-          - os: windows-latest
+            artifact: hake-macos-universal.tar.gz
+            staging: hake-macos-universal
+            sha: hake-macos-universal.sha256
+
+          - name: windows-x86_64
+            os: windows-latest
             platform: windows
-            artifact: hake-windows.zip
-            staging: hake-windows
-            sha: hake-windows.sha256
+            artifact: hake-windows-x86_64.zip
+            staging: hake-windows-x86_64
+            sha: hake-windows-x86_64.sha256
 
     steps:
       - uses: actions/checkout@v4
@@ -52,11 +64,12 @@ jobs:
           tar czf ${{ matrix.artifact }} ${{ matrix.staging }}
           (cd ${{ matrix.staging }} && sha256sum hake > ../${{ matrix.sha }})
 
-      - name: Build (macos)
+      - name: Build (macos universal2)
         if: matrix.platform == 'macos'
         run: |
-          make BUNDLE_HAKO=0
+          make UNIVERSAL=1 BUNDLE_HAKO=0
           ./hake --version
+          file hake
           mkdir -p ${{ matrix.staging }}
           cp hake README.md LICENSE.txt ${{ matrix.staging }}/
           [ -f icon/hake.icns ] && cp icon/hake.icns ${{ matrix.staging }}/ || true
@@ -91,16 +104,47 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}
+          name: ${{ matrix.name }}
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.sha }}
           if-no-files-found: error
 
+  build-freebsd:
+    name: build (freebsd-x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.1"
+          usesh: true
+          prepare: |
+            pkg install -y curl gmake gcc
+          run: |
+            gmake CC=gcc BUNDLE_HAKO=0
+            ./hake --version
+            mkdir -p hake-freebsd-x86_64
+            cp hake README.md LICENSE.txt hake-freebsd-x86_64/
+            tar czf hake-freebsd-x86_64.tar.gz hake-freebsd-x86_64
+            (cd hake-freebsd-x86_64 && printf '%s  hake\n' "$(sha256 -q hake)" > ../hake-freebsd-x86_64.sha256)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: freebsd-x86_64
+          path: |
+            hake-freebsd-x86_64.tar.gz
+            hake-freebsd-x86_64.sha256
+          if-no-files-found: error
+
   release:
     name: publish release
-    needs: build
+    needs: [build, build-freebsd]
     runs-on: ubuntu-latest
+    if: always() && needs.build.result == 'success'
     steps:
       - uses: actions/checkout@v4
 
@@ -125,7 +169,9 @@ jobs:
           name: hake (hako-edit) ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
           files: |
-            dist/**/hake-linux.tar.gz
-            dist/**/hake-macos.tar.gz
-            dist/**/hake-windows.zip
+            dist/**/hake-linux-x86_64.tar.gz
+            dist/**/hake-linux-arm64.tar.gz
+            dist/**/hake-macos-universal.tar.gz
+            dist/**/hake-windows-x86_64.zip
+            dist/**/hake-freebsd-x86_64.tar.gz
             dist/**/*.sha256

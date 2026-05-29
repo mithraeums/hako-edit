@@ -26,8 +26,17 @@ else
     UNAME_S := $(shell uname -s)
     ifeq ($(UNAME_S),Darwin)
         PLATFORM = macos
+    else ifeq ($(UNAME_S),FreeBSD)
+        PLATFORM = freebsd
     else
         PLATFORM = linux
+    endif
+endif
+
+# macOS universal2 toggle: make UNIVERSAL=1 → fat binary (arm64 + x86_64).
+ifeq ($(PLATFORM),macos)
+    ifeq ($(UNIVERSAL),1)
+        CFLAGS += -arch arm64 -arch x86_64
     endif
 endif
 
@@ -93,6 +102,14 @@ ifeq ($(PLATFORM),linux)
 $(BIN): hake.c
 	$(CC) $(CFLAGS) $< -o $@ $(LDLIBS)
 	@echo "built $(BIN). For a desktop icon: copy $(ICON_DIR)/hake.png to ~/.local/share/icons/ and create a .desktop entry."
+
+endif
+
+# ---------- FreeBSD: plain build ----------
+ifeq ($(PLATFORM),freebsd)
+
+$(BIN): hake.c
+	$(CC) $(CFLAGS) $< -o $@ $(LDLIBS)
 
 endif
 

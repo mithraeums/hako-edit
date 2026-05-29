@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://mithraeums.github.io">
-    <img src="https://mithraeums.github.io/assets/banner-hako-dark.svg" alt="hako — a quiet box around the cursor" width="100%"/>
+    <img src="https://mithraeums.github.io/assets/banner-hake-dark.svg" alt="hake — a quiet box around the cursor" width="100%"/>
   </a>
 </p>
 
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mithraeums/hako/releases"><img src="https://img.shields.io/badge/version-v0.1.1-b89656?style=flat-square&labelColor=14130f" alt="v0.1.1"/></a>
+  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.3-b89656?style=flat-square&labelColor=14130f" alt="v0.1.3"/></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-c8c2b2?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/C99-single%20file-c8c2b2?style=flat-square&labelColor=14130f" alt="C99 single file"/>
   <img src="https://img.shields.io/badge/themes-17-c8c2b2?style=flat-square&labelColor=14130f" alt="17 themes"/>
@@ -17,33 +17,38 @@
 </p>
 
 <p align="center">
-  <sub><a href="https://mithraeums.github.io">site</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako/releases">releases</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hakoCLAW">claw</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums">org</a></sub>
+  <sub><a href="https://mithraeums.github.io">site</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-edit/releases">releases</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-code">hako-code</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums">org</a></sub>
 </p>
 
 <br>
 
+<!-- SCREENSHOT: screenshot-splash.png — hake splash screen with the block-letter HAKO logo, "EDIT" subtitle, "HAKE v0.1.3", 箱 kanji, and the # NEW / # TIPS columns below. Launch `hake` with no args, screenshot full terminal. NEEDS UPDATE — old version doesn't show EDIT line. -->
 <p align="center">
-  <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/screenshot-splash.png?raw=true" alt="Splash" width="82%"/>
+  <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-splash.png?raw=true" alt="Splash" width="82%"/>
 </p>
 
 <table align="center">
   <tr>
     <td align="center" width="50%">
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/screenshot-explorer.png?raw=true" alt="Kami explorer" width="100%"/><br/>
+      <!-- SCREENSHOT: screenshot-explorer.png — Kami file explorer pane open on left, editor pane right. `:explorer` or Ctrl-W k. -->
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-explorer.png?raw=true" alt="Kami explorer" width="100%"/><br/>
       <sub><b>紙 Kami</b>: file explorer</sub>
     </td>
     <td align="center" width="50%">
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/screenshot-rei.png?raw=true" alt="Split panes with Rei" width="100%"/><br/>
-      <sub>Split panes + <b>零 Rei</b> AI</sub>
+      <!-- SCREENSHOT: screenshot-rei.png — Rei pane open with a hako-sho-stock conversation visible. Banner should say `hako 0.1.6 · mithraeum · hako-sho-stock`. NEEDS UPDATE — old version showed claw branding. -->
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-rei.png?raw=true" alt="Split panes with Rei" width="100%"/><br/>
+      <sub>Split panes + <b>零 Rei</b> AI (powered by hako-code)</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/screenshot-editor.png?raw=true" alt="Editor help" width="100%"/><br/>
-      <sub>Editor help overlay</sub>
+      <!-- SCREENSHOT: screenshot-split.png — multi-pane split view. -->
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-split.png?raw=true" alt="Split panes" width="100%"/><br/>
+      <sub>Multi-pane splits · resize with <code>Ctrl-W</code></sub>
     </td>
     <td align="center" width="50%">
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/screenshot-themes.png?raw=true" alt="Theme picker" width="100%"/><br/>
+      <!-- SCREENSHOT: screenshot-themes.png — `:theme` listing or side-by-side of a few presets. -->
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-themes.png?raw=true" alt="Theme picker" width="100%"/><br/>
       <sub>Theme picker · 17 presets</sub>
     </td>
   </tr>
@@ -51,7 +56,7 @@
 
 <br>
 
-零 **Rei** lives inside Hako; powered by <a href="https://github.com/mithraeums/hakoCLAW"> hakoCLAW</a>:
+零 **Rei** lives inside hake; powered by <a href="https://github.com/mithraeums/hako-code">hako-code</a>:
 ```
  ▄█████▄
 ██ ███ ██ Rei: v1.1
@@ -67,7 +72,7 @@
 - **Full Motion Set**: counts, named registers, text objects (`diw`, `ci"`, `da(`), marks, jumplist, dot-repeat, `:s/` substitution, bracket match
 - **Multi-Pane Support**: Split horizontally and vertically, resize with `Ctrl-W +/-/</>`
 - **File Explorer**: 紙 Kami - directory navigation, hidden-file toggle, dirs-first sort
-- **AI Assistant**: 零 Rei - multi-provider (Anthropic, OpenAI, Ollama), function-calling tool loop, SSE streaming, per-project trust and history
+- **AI Assistant**: 零 Rei - powered by [hako-code](https://github.com/mithraeums/hako-code) in a split pane. Local hako models (sho-stock / koi-mini-stock) or any of its 13 cloud providers, function-calling tool loop, SSE streaming, per-project trust and history
 - **Skills**: drop `~/.hako/skills/*.md` into the system prompt, install from any URL with `/skill install`
 - **Syntax Highlighting**: 40+ languages, search-match highlighting persists across edits
 - **Undo/Redo**: time-bounded undo blocks, configurable depth
@@ -85,7 +90,7 @@
 
 ```sh
 # One-liner - works on Linux, macOS, Windows (mingw)
-gcc hako.c -o hako -lpthread
+gcc hake.c -o hake -lpthread
 
 # Or use the Makefile to also embed the executable icon where the OS allows
 make
@@ -93,12 +98,12 @@ make
 
 **Run**
 ```sh
-./hako              # or  ./hako [filename]
+./hake              # or  ./hake [filename]
 ```
 
 **Install** (drop the binary into your PATH):
 ```sh
-cp hako /usr/local/bin/hako          # Linux / macOS
+cp hake /usr/local/bin/hake          # Linux / macOS
 ```
 
 > **Deps:** C standard library + POSIX/Win32 system headers + `pthread`. No third-party libraries linked. AI features shell out to `curl(1)` at runtime.
@@ -107,7 +112,7 @@ cp hako /usr/local/bin/hako          # Linux / macOS
 
 ```sh
 # Curl one-liner (Linux / macOS / Windows-MinGW)
-curl -fsSL https://raw.githubusercontent.com/mithraeums/hako/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mithraeums/hako-edit/main/install.sh | sh
 ```
 
 Verifies sha256, installs to `/usr/local/bin` if writable else `~/.local/bin`. macOS quarantine xattr stripped post-install. Set `VERIFY=0` to skip sha verify, `PREFIX=/opt` to relocate.
@@ -118,15 +123,15 @@ The icon files live in `icon/`:
 
 | Platform | File          | What `make` does                                                                |
 |----------|---------------|---------------------------------------------------------------------------------|
-| Windows  | `hako.ico`    | Embeds icon into `.exe` via `windres`; real OS icon.                           |
-| macOS    | `hako.icns`   | Attaches icon as a resource fork via `Rez`+`SetFile` (Xcode CLT). Best-effort.  |
-| Linux    | `hako.png`    | ELF can't embed icons; ship `hako.png` and reference it from a `.desktop` file. |
+| Windows  | `hake.ico`    | Embeds icon into `.exe` via `windres`; real OS icon.                           |
+| macOS    | `hake.icns`   | Attaches icon as a resource fork via `Rez`+`SetFile` (Xcode CLT). Best-effort.  |
+| Linux    | `hake.png`    | ELF can't embed icons; ship `hake.png` and reference it from a `.desktop` file. |
 
-A plain `gcc hako.c -o hako` produces a working binary on every platform; the icon is purely cosmetic.
+A plain `gcc hake.c -o hake` produces a working binary on every platform; the icon is purely cosmetic.
 
 ### iSh (iOS - experimental)
 
-hako compiles on Alpine via [iSh](https://ish.app):
+hake compiles on Alpine via [iSh](https://ish.app):
 
 ```sh
 apk add gcc make musl-dev curl
@@ -258,7 +263,7 @@ Notes:
 
 ## Configuration
 
-Use supplied config, or generate one with `:config` inside the editor. HAKO looks for `.hakorc` in the current directory first, then your home directory.
+Use supplied config, or generate one with `:config` inside the editor. HAKE looks for `.hakorc` in the current directory first, then your home directory.
 
 ```
 # Example .hakorc
@@ -288,7 +293,7 @@ Run `:config` to generate a fully documented `.hakorc` with all options.
 
 ## Supported Languages
 
-HAKO provides syntax color for 40+ languages, some of which include:
+hake provides syntax color for 40+ languages, some of which include:
 
 **Systems**: C, C++, Rust, Go, Zig, Assembly  
 **Scripting**: Python, Ruby, Perl, Lua, Shell, PHP  
@@ -302,171 +307,16 @@ HAKO provides syntax color for 40+ languages, some of which include:
 
 ## Change Log
 
-### v0.1.1 (Latest)<br>
-Windows + iSh fixes + splash polish.
+### v0.1.3 (Latest)<br>
+Editor renamed to **hake** (binary) / **hako-edit** (repo). Aligns with the v0.1.6 hako-code + hako-models suite.
 
-- **Windows build fixed** `detectTerminalType` definition moved outside the `#ifndef _WIN32` block (forward-decl was visible, body wasn't — MinGW link error). Unblocks `v0.1*` tag artifacts.
-- **iSh hardening** `gridResize` caps `w`/`h` at 4096 with `size_t` math + alloc-failure rollback; `editorUpdateWindowSize` clamps `rows`/`cols` (24×80 floor, 4096 ceil). Defensive fix for iPad memlock on startup.
-- **Skill loader bounded** Checked `realloc`, `fread` advance uses `got` not requested size, 64-skill ceiling, 1 MiB cumulative prompt cap, `fclose` on every early break path.
-- **`editorLoadConfig` early-return bug** No `.hakorc` previously short-circuited before `hkLoadSession()` — fresh setups never resumed. Now loads session even when config absent.
-- **Splash gained `# NEW` + `# TIPS`** sections (renders when screen has the vertical room).
+- **CLI rename: `hako` → `hake`.** Source file `hako.c` → `hake.c`; macros `HAKO_*` → `HAKE_*`; status bar reads `HAKE v0.1.3`; help text + `--version` updated. Splash now shows `EDIT` under the block-letter logo.
+- **Subprocess wire updated.** Internal symbols `claw*` → `hako*` (the wire is to the `hako` agent, not to the legacy `claw` name). `hakeFindBinary` searches for `hako` on `PATH` / `~/.local/bin` / `/usr/local/bin`. `BUNDLE_HAKO=1` (default) compiles `../hako-code/hako.c` alongside `hake`.
+- **Mithraeum default theme** — void / paper / gold / rust palette matches the site banners + hake / hako-code icons. Boot default; 17 other presets still available via `:theme <name>`.
+- **SIGPIPE-safe** — hako agent crashing mid-turn no longer kills the editor; `hakoSendLine` detects `EPIPE`, `hakoShutdown` reaps cleanly.
+- **Config consolidation.** Both `hake` and `hako` read `~/.hakorc` (was `~/.hakocrc` on the agent side); editor-only keys and AI keys coexist under sectioned headers.
 
-### Previous Versions
-<details>
-<summary>Previous Changes</summary>
-
-***v0.1.0***<br>
-Polish + portability + safety pass.
-
-Editor / panes
-- Cell-grid diff renderer: front/back buffers, minimal escape emission, no flicker
-- Squished-terminal vertical pane stack: AI auto-stacks below editor when too narrow (≥ 16 rows)
-- Cross-pane close: `:q rei` / `:q kami` (also `:close <name>`) closes named side from any focused pane
-- Explorer border fix; mouse hit-testing covers all panes including stacked
-- Themes: `:theme <name>` / `:colorscheme <name>` runtime switch (17 presets)
-- Binary-file refuse: NUL-byte detection in first 4KB → no garbage spew on image opens
-
-Rei (AI panel)
-- Cursor in prompt: `←/→/↑/↓/Home/End`, BS/DEL splice at cursor, mid-text edits
-- Visual mode in chat history: `j/k/gg/G/Ctrl-D/Ctrl-F/Ctrl-U/Ctrl-B/V/y/Esc/Ctrl-C/Ctrl-W`
-- Provider aliases: `deepseek`, `mistral`, `together`, `fireworks`, `openrouter`, `groq`, `xai/grok`; endpoint auto-filled
-- Token tracking: `/usage` shows `last N in / M out  total ... (cap K)` across Anthropic/OpenAI/Ollama
-- Blockquote tint: AI lines starting `> ` use comment color
-- `ai_autowrite=0` stages writes to `<path>.hako-pending` (line/byte diff returned)
-- Sessions: `/sessions`, `/resume <id>`, `/session [new]`; auto-resume hint on launch
-- Universal tools (Anthropic native + Ollama/OpenAI function-calling fallback)
-- Per-call announcements (`→ read_file(test.txt)` / `← N bytes` / `error: ...`)
-- Spinner: `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ thinking...`
-- Streaming: `\n` sanitized live, multi-line split on stream end
-
-Build / release
-- GitHub Actions release workflow (linux/macos/windows on tag `v0.1*`)
-- README documents iSh build (`apk add gcc make musl-dev curl && make`)
-- Makefile unchanged for one-liner: `gcc -O2 -Wall hako.c -o hako -lpthread`
-
-***v0.0.9***<br>
-Big one. HAKO goes from editor-with-AI-panel to modal editing environment with a real agent inside.
-
-Editor
-- Full vim-motion set: count prefix (`5j`, `3dd`), named registers (`"ayy`, `"ap`), text objects (`diw`, `ci"`, `da(`), marks (`ma`, `'a`), jumplist (`Ctrl-O` / `Tab`), dot-repeat (`.`), substitution (`:s/foo/bar/g`), bracket match (`%`), word-under-cursor search (`*`, `#`)
-- Search highlighting persists across edits, all matches lit (not just current)
-- Line-delete feedback in status (`N lines deleted`)
-- `:e` expands `~/`, resolves relative and absolute paths so `:w` saves where you meant
-- `:q` closes the active pane, not the whole program
-- `dw`, `cw`, `:w file.txt` confirmed working
-- 17 theme presets (dark, light, gruvbox, nord, dracula, monokai, solarized, tokyonight, catppuccin, onedark, material, everforest, rosepine, github-dark, github-light, ayu, kanagawa)
-- Responsive layout; side panels auto-collapse on narrow terminals
-- Explorer entries always sorted: directories first, then files, case-insensitive
-- Status bar now uses the border color so panels feel like one chassis
-
-Rei 零
-- Multi-provider: Anthropic, OpenAI, Ollama (swap with `/provider`)
-- Function-calling tool loop (Anthropic): `read_file`, `list_dir`, `write_file`, `run_shell`
-- SSE streaming for text responses
-- Project trust: first `:ai` asks before enabling file tools in a directory; grants stored in `<project>/.hako/trust`
-- Per-project chat history in `<project>/.hako/history` when trusted, falls back to `~/.hako/history`
-- Skills loader: `~/.hako/skills/*.md` injected into system prompt; `/skill install <url>` downloads a skill
-- Multi-line input: Enter inserts newline in INSERT, sends in NORMAL. Input bar wraps and stays visible
-- Slash commands: `/help`, `/provider`, `/model`, `/tools`, `/trust`, `/skills`, `/skill install`, `/history`, `/file`, `/clear`, `/quit`
-- Model + provider choice persists across restarts (`~/.hako/state`)
-- Configurable mascot (`ai_mascot=path/to/art.txt`), lucky-cat default
-
-Fixes
-- Pane focus no longer dangles when a side panel is closed from inside it
-- Ctrl-W back from Rei does not lock the terminal
-- Inline prompt reads (`"a`, `di"`, `ma`, `r`) skip mouse-motion events instead of consuming them as the expected letter
-- Splash logo + status bar now theme-aware (match border color)
-- Cursor lands in the selected explorer entry and in the Rei input bar instead of the status line
-- Window-size changes resize panes immediately instead of drifting until the next SIGWINCH
-
-***v0.0.8***<br>
-Major stability and usability update
-Features
-- Bracketed paste mode support; no more staircase indentation on paste
-- Rapid-input paste detection fallback for terminals without bracketed paste
-- System clipboard integration (Ctrl-C to copy, Ctrl-V to paste)
-- New vim motions: I, a, A, o, O (insert variants), x (delete char), D (delete to EOL), C (change to EOL)
-- Visual mode navigation: w/b, 0/$, gg/G, Ctrl-F/Ctrl-B for fast selection
-- dd now yanks the deleted line into the paste buffer (vim behavior)
-- Scroll wheel moves cursor naturally (like j/k) instead of jumping the viewport
-- Mouse click works in insert mode without producing artifacts
-- Dynamic line number width; scales for 10,000+ line files
-- Improved terminal type detection (Apple Terminal 256-color support)
-- Improved ANSI color fallback for basic terminals (visual selection visible everywhere)
-
-Bug Fixes
-- Fixed file save writing to wrong location when opened from a path
-- Fixed pane tree memory leaks on close and exit
-- Fixed right panel (AI) not being freed on cleanup
-- Reduced screen flicker via buffer optimization (geometric growth in append buffer)
-- Consistent naming across codebase (紙 Kami = explorer, 角 Kaku = AI)
-- Explicit smart_indent initialization
-
-
-***v0.0.7***<br>
-Huge update to the previous version
-- New splash screen
-- Complete visual mode implementation (v/V)
-- Full copy/paste system with yank buffer
-- Additional vim motions (w/b, 0/$, r, J)
-- Screen splitting
-- 紙 Kami explorer panel
-- 角 Kaku AI assistant panel (scaffolding)
-- Enhanced help system
-- Improved terminal cleanup
-- Themes in .hakorc
-- Config generation via :config command
-- Mouse support with click-to-position and scroll wheel
-
-***v0.0.6***<br>
-Features & Quality of Life
-- Full visual mode implementation (v for character, V for line selection)
-- Complete copy/paste system with yank buffer (y to copy, p/P to paste)
-- Additional vim motions: w/b (word movement), 0/$ (line start/end)
-- Character replacement with r, line joining with J
-- Enhanced help system (:help in editor, -h/--help from command line)
-- New file creation - editing non-existent files creates them on save
-- Improved terminal cleanup on exit
-
-Bug Fixes
-- Fixed undo/redo segfault when undoing paste operations
-- Resolved terminal color persistence after exit
-- Corrected visual selection boundary handling
-- Fixed edge cases with empty line selections
-
-***v0.0.5***<br>
-Features & Quality of Life
-- While I'm not looking to create another neovim, there are many features of vim I do enjoy
-- More vi-like functionality with undo (u in normal)/redo (ctrl + r in normal) blocks
-- Undo blocks function with time, action, and mode based boundaries
-- Configurable undo levels, located in .hakorc (default=100)
-- Options for number and relative number mode, replacing (ex. "~" with "1") available in .hakorc
-- Number mode currently supports up 4 characters (ex. 9999 lines)
-
-Bug Fixes
-- Fixed terminal crashing from invalid line jumps
-- Corrected cursor positioning and edge cases pertaining to empty file navigation
-- Removed duplicate code and minor debug output left in from previous testing
-
-**v0.0.4**
-- Added familiar vi-inspired modes & commands (normal & insert, /, :, :w, :wq, :q)
-- Line jump function via :NUMBER (ex. :120 goes to line 120)
-- Ctrl + f pages fwd ctrl + b pages bwd
-
-**v0.0.3**
-- Implemented tt (go to line 1) and bb (go to last line) normal mode shortcuts
-- Improved the fuzzy find triggered by /, use arrow keys or scroll to move between finds, enter/esc to exit
-- Added language support for c++, c#, java, Rust, SQL, HTML/CSS, and Javascript (in addition to Python & C)
-
-**v0.0.2**
-- Established default font color theme, found in .hakorc
-- Alternate-screen & clean exit, wiping the terminal
-
-**v0.0.1**
-- Initial push
-- Basic text editing
-- Ability to save and load files
-</details>
+See [CHANGELOG.md](./CHANGELOG.md) for full history.
 
 <p align="center"><sub><b>—— VII ——</b></sub></p>
 

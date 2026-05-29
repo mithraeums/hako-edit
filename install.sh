@@ -16,13 +16,23 @@ uname_m="$(uname -m)"
 
 case "$uname_s" in
 	Linux*)
-		asset="hake-linux.tar.gz"; dirname="hake-linux"; bin=hake; ext=tar.gz
+		case "$uname_m" in
+			x86_64|amd64)   asset="hake-linux-x86_64.tar.gz"; dirname="hake-linux-x86_64"; bin=hake; ext=tar.gz ;;
+			arm64|aarch64)  asset="hake-linux-arm64.tar.gz";  dirname="hake-linux-arm64";  bin=hake; ext=tar.gz ;;
+			*) echo "unsupported linux arch: $uname_m — build from source (gcc -O2 -Wall hake.c -o hake -lpthread)" >&2; exit 1 ;;
+		esac
 		;;
 	Darwin*)
-		asset="hake-macos.tar.gz"; dirname="hake-macos"; bin=hake; ext=tar.gz
+		asset="hake-macos-universal.tar.gz"; dirname="hake-macos-universal"; bin=hake; ext=tar.gz
+		;;
+	FreeBSD*)
+		case "$uname_m" in
+			amd64|x86_64) asset="hake-freebsd-x86_64.tar.gz"; dirname="hake-freebsd-x86_64"; bin=hake; ext=tar.gz ;;
+			*) echo "unsupported freebsd arch: $uname_m" >&2; exit 1 ;;
+		esac
 		;;
 	MINGW*|MSYS*|CYGWIN*)
-		asset="hake-windows.zip"; dirname="hake-windows"; bin=hake.exe; ext=zip
+		asset="hake-windows-x86_64.zip"; dirname="hake-windows-x86_64"; bin=hake.exe; ext=zip
 		;;
 	*) echo "unsupported OS: $uname_s — try building from source (gcc -O2 -Wall hake.c -o hake -lpthread)" >&2; exit 1 ;;
 esac
