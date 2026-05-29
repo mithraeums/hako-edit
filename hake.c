@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 				
 /*** includes ***/
-#define HAKO_VERSION "0.1.2"
+#define HAKE_VERSION "0.1.3"
 
 #include <ctype.h>
 #include <errno.h>
@@ -113,9 +113,9 @@ static long hk_getline(char **lineptr, size_t *n, FILE *stream) {
 #define AI_HISTORY_MAX 1000
 #define PASTE_BUFFER_MAX 65536
 
-const char *HAKO_HELP_TEXT = 
-	"hako - A minimal text editor v" HAKO_VERSION "\n\n"
-	"Usage: hako [options] [file]\n\n"
+const char *HAKE_HELP_TEXT =
+	"hake (hako-edit) - A minimal text editor v" HAKE_VERSION "\n\n"
+	"Usage: hake [options] [file]\n\n"
 	"Options:\n"
 	"  -h, --help     Show this help message\n"
 	"  -v, --version  Show version information\n\n"
@@ -334,7 +334,7 @@ typedef struct pluginData {
 #define HK_ROLE_AI     2
 
 typedef struct aiData {
-	/* display state (owned by hako, hakoc manages the API conversation) */
+	/* display state (owned by hako, hako manages the API conversation) */
 	char **history;
 	unsigned char *history_role;
 	int history_count;
@@ -360,7 +360,7 @@ typedef struct aiData {
 	int stream_slot;
 	char *stream_acc;        /* accumulated raw token text */
 	size_t stream_acc_len;
-	/* token usage (received from hakoc "done" events) */
+	/* token usage (received from hako "done" events) */
 	int last_in_tokens;
 	int last_out_tokens;
 	long total_in_tokens;
@@ -531,10 +531,10 @@ struct editorConfig {
 	char *plugin_dir;
 	pluginAPI plugin_api;
 	
-	/* hakoc session info (received from hakoc "init" / "done" events) */
-	char *claw_session_id;
-	int claw_session_turns;
-	int claw_session_resumed;
+	/* hako session info (received from hako "init" / "done" events) */
+	char *hako_session_id;
+	int hako_session_turns;
+	int hako_session_resumed;
 
 	int auto_indent;
 	int smart_indent;
@@ -634,12 +634,12 @@ pasteBuffer *hkGetRegister(char name);
 void hkFreeRegisters(void);
 void hkPushJump(int x, int y);
 void hkClampCursor(editorPane *pane);
-static char *clawFindBinary(void);
-static int clawLaunch(aiData *data);
-static void clawShutdown(void);
-static void clawSendLine(const char *json);
-static void clawHandleEvent(aiData *data, const char *line);
-static void *clawReaderThread(void *arg);
+static char *hakoFindBinary(void);
+static int hakoLaunch(aiData *data);
+static void hakoShutdown(void);
+static void hakoSendLine(const char *json);
+static void hakoHandleEvent(aiData *data, const char *line);
+static void *hakoReaderThread(void *arg);
 void aiWorkerSend(aiData *data);
 int hkHandleSlash(aiData *data, const char *prompt);
 
@@ -1149,8 +1149,8 @@ char *TOML_HL_keywords[] = {
 	"true", "false", NULL
 };
 
-char *HAKO_HL_extensions[] = {".hakorc", "hakorc", NULL};
-char *HAKO_HL_keywords[] = {
+char *HAKE_HL_extensions[] = {".hakorc", "hakorc", NULL};
+char *HAKE_HL_keywords[] = {
 	"tab_stop", "use_tabs", "word_wrap", "word_wrap_column",
 	"show_line_numbers", "max_undo_levels", "explorer_enabled",
 	"explorer_width", "explorer_show_hidden", "show_splash", "mode",
@@ -1211,7 +1211,7 @@ struct editorSyntax HLDB[] = {
 	{"mips", MIPS_HL_extensions, MIPS_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS},
 	{"toml", TOML_HL_extensions, TOML_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
 	{"text", DEFAULT_HL_extensions, DEFAULT_HL_keywords, NULL, NULL, NULL, 0},
-	{"hako", HAKO_HL_extensions, HAKO_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS}
+	{"hako", HAKE_HL_extensions, HAKE_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS}
 };
 
 
@@ -1807,6 +1807,70 @@ void setBgColor(struct abuf *ab, int color) {
 }
 
 /*** clipboard ***/
+
+/* System clipboard transport. v0.1.3: previous chain
+   `xclip ... 2>/dev/null || pbcopy ...` had two bugs on macOS:
+   (1) xclip-not-found error was swallowed by 2>/dev/null but the shell still
+   spawned xclip's pipe-reader before pbcopy, so the first chunk of large yanks
+   could be lost; (2) `pbcopy` does its own line-ending normalization that can
+   confuse paste targets expecting raw bytes (esp. with mixed tabs+spaces).
+   Pick the right tool per OS, send bytes via stdin in one shot, no shell `||`. */
+static int hkSystemClipboardWrite(const char *data, int len) {
+	if (!data || len <= 0) return 0;
+	const char *cmd = NULL;
+#ifdef __APPLE__
+	cmd = "pbcopy";
+#elif defined(_WIN32)
+	cmd = "clip";
+#else
+	if (getenv("WAYLAND_DISPLAY")) cmd = "wl-copy";
+	else if (getenv("DISPLAY"))    cmd = "xclip -selection clipboard -i";
+	else                            cmd = "xsel -bi";
+#endif
+	FILE *fp = popen(cmd, "w");
+	if (!fp) return 0;
+	size_t off = 0;
+	while (off < (size_t)len) {
+		size_t n = fwrite(data + off, 1, len - off, fp);
+		if (n == 0) break;
+		off += n;
+	}
+	int rc = pclose(fp);
+	return (rc == 0 && off == (size_t)len);
+}
+
+static int hkSystemClipboardRead(char **out, size_t *out_len) {
+	*out = NULL; *out_len = 0;
+	const char *cmd = NULL;
+#ifdef __APPLE__
+	cmd = "pbpaste";
+#elif defined(_WIN32)
+	cmd = "powershell -NoProfile -Command Get-Clipboard";
+#else
+	if (getenv("WAYLAND_DISPLAY")) cmd = "wl-paste --no-newline";
+	else if (getenv("DISPLAY"))    cmd = "xclip -selection clipboard -o";
+	else                            cmd = "xsel -bo";
+#endif
+	FILE *fp = popen(cmd, "r");
+	if (!fp) return 0;
+	char buf[4096];
+	char *accum = NULL;
+	size_t total = 0;
+	size_t got;
+	while ((got = fread(buf, 1, sizeof(buf), fp)) > 0) {
+		char *na = realloc(accum, total + got + 1);
+		if (!na) { free(accum); pclose(fp); return 0; }
+		accum = na;
+		memcpy(accum + total, buf, got);
+		total += got;
+	}
+	pclose(fp);
+	if (!accum) return 0;
+	accum[total] = '\0';
+	*out = accum; *out_len = total;
+	return 1;
+}
+
 void editorInitPasteBuffer() {
 	E.paste.data = NULL;
 	E.paste.len = 0;
@@ -1890,8 +1954,7 @@ void hkSetRegister(char name, const char *data, int len, int is_line, int is_yan
 
 	if (idx >= 0) {
 		if (name == '+' || name == '*') {
-			FILE *cmd = popen("xclip -selection clipboard 2>/dev/null || pbcopy 2>/dev/null", "w");
-			if (cmd) { fwrite(data, 1, len, cmd); pclose(cmd); }
+			hkSystemClipboardWrite(data, len);
 			hkRegAssign(&E.hk.registers[idx], data, len, is_line);
 		} else if (append) {
 			hkRegAppend(&E.hk.registers[idx], data, len, is_line);
@@ -1913,26 +1976,13 @@ void hkSetRegister(char name, const char *data, int len, int is_line, int is_yan
 
 pasteBuffer *hkGetRegister(char name) {
 	if (name == '+' || name == '*') {
-		FILE *cmd = popen("xclip -selection clipboard -o 2>/dev/null || pbpaste 2>/dev/null", "r");
-		if (cmd) {
-			char buf[4096];
-			size_t total = 0;
-			char *accum = NULL;
-			size_t got;
-			while ((got = fread(buf, 1, sizeof(buf), cmd)) > 0) {
-				accum = realloc(accum, total + got + 1);
-				memcpy(accum + total, buf, got);
-				total += got;
-			}
-			pclose(cmd);
-			if (accum) {
-				accum[total] = '\0';
-				int is_line = (total > 0 && accum[total - 1] == '\n');
-				int idx = hkRegIndex(name);
-				hkRegAssign(&E.hk.registers[idx], accum, total, is_line);
-				free(accum);
-				return &E.hk.registers[idx];
-			}
+		char *accum = NULL; size_t total = 0;
+		if (hkSystemClipboardRead(&accum, &total) && accum) {
+			int is_line = (total > 0 && accum[total - 1] == '\n');
+			int idx = hkRegIndex(name);
+			hkRegAssign(&E.hk.registers[idx], accum, total, is_line);
+			free(accum);
+			return &E.hk.registers[idx];
 		}
 	}
 	int idx = hkRegIndex(name);
@@ -1953,64 +2003,50 @@ void editorCopyToSystemClipboard() {
 	if (E.mode == MODE_VISUAL || E.mode == MODE_VISUAL_LINE) {
 		editorYankVisualSelection();
 	}
-	
 	if (!E.paste.data || E.paste.len == 0) return;
-	
-	FILE *cmd = popen("xclip -selection clipboard 2>/dev/null || pbcopy 2>/dev/null", "w");
-	if (cmd) {
-		fwrite(E.paste.data, 1, E.paste.len, cmd);
-		pclose(cmd);
-		editorSetStatusMessage("Copied to system clipboard");
+	if (hkSystemClipboardWrite(E.paste.data, E.paste.len)) {
+		editorSetStatusMessage("Copied %d bytes to system clipboard", E.paste.len);
+	} else {
+		editorSetStatusMessage("Clipboard write failed (no pbcopy / xclip / wl-copy on PATH)");
 	}
 }
 
 void editorPasteFromSystemClipboard() {
-	FILE *cmd = popen("xclip -selection clipboard -o 2>/dev/null || pbpaste 2>/dev/null", "r");
-	if (!cmd) return;
-	
-	char buffer[4096];
-	size_t total = 0;
-	
+	char *accum = NULL; size_t total = 0;
+	if (!hkSystemClipboardRead(&accum, &total) || !accum || total == 0) {
+		editorSetStatusMessage("Clipboard empty or no read tool on PATH");
+		free(accum);
+		return;
+	}
+
 	free(E.system_paste.data);
-	E.system_paste.data = NULL;
-	E.system_paste.len = 0;
-	
+	E.system_paste.data = accum;
+	E.system_paste.len = total;
+
 	editorSaveState();
 	E.is_pasting = 1;
-	
+
 	int saved_auto_indent = E.auto_indent;
 	int saved_smart_indent = E.smart_indent;
 	E.auto_indent = 0;
 	E.smart_indent = 0;
-	
-	while (fgets(buffer, sizeof(buffer), cmd)) {
-		int len = strlen(buffer);
-		E.system_paste.data = realloc(E.system_paste.data, total + len + 1);
-		memcpy(E.system_paste.data + total, buffer, len);
-		total += len;
-	}
-	
-	pclose(cmd);
-	
-	if (total > 0) {
-		E.system_paste.len = total;
-		E.system_paste.data[total] = '\0';
-		
-		for (int i = 0; i < total; i++) {
-			char c = E.system_paste.data[i];
-			if (c == '\n' || c == '\r') {
-				if (c == '\r' && i + 1 < total && E.system_paste.data[i + 1] == '\n') {
-					i++;
-				}
-				editorInsertNewLine();
-			} else if (c != '\0') {
-				editorInsertChar(c);
-			}
+
+	/* Insert bytes verbatim so tabs/indents survive round-trip. fgets-based reader
+	   used to drop the trailing NUL on lines without newlines; raw byte walk fixes that. */
+	for (size_t i = 0; i < total; i++) {
+		unsigned char c = (unsigned char)E.system_paste.data[i];
+		if (c == '\n' || c == '\r') {
+			if (c == '\r' && i + 1 < total && E.system_paste.data[i + 1] == '\n') i++;
+			editorInsertNewLine();
+		} else if (c == '\t') {
+			editorInsertChar('\t');
+		} else if (c >= 32 || c >= 0x80) {
+			editorInsertChar((char)c);
 		}
-		
-		editorSetStatusMessage("Pasted %d bytes from system clipboard", total);
+		/* drop other control bytes silently */
 	}
-	
+	editorSetStatusMessage("Pasted %zu bytes from system clipboard", total);
+
 	E.auto_indent = saved_auto_indent;
 	E.smart_indent = saved_smart_indent;
 	E.is_pasting = 0;
@@ -2107,7 +2143,7 @@ void editorFreePane(editorPane *pane) {
 		free(pane->ai->prompt_buffer);
 		free(pane->ai->stream_acc);
 		free(pane->ai);
-		clawShutdown();
+		hakoShutdown();
 	}
 
 	free(pane);
@@ -5235,7 +5271,7 @@ void editorProcessKeyPress() {
 	if (!pane || pane->type != PANE_EDITOR) return;
 
 	if (E.mode == MODE_NORMAL) {
-		if (getenv("HAKO_TRACE")) {
+		if (getenv("HAKE_TRACE")) {
 			editorSetStatusMessage("key=%d('%c') last=%d('%c') reg=%d", c,
 				(c >= 32 && c < 127) ? c : '?', last_char,
 				(last_char >= 32 && last_char < 127) ? last_char : '?',
@@ -6288,8 +6324,18 @@ void editorDrawSplash() {
 	setThemeColor(&ab, kanji_color);
 	abAppend(&ab, kanji, strlen(kanji));
 
+	/* EDIT subtitle — regular letters under the kanji, above the version line.
+	   Part of the hako-edit (hake) rebrand in v0.1.3. */
+	const char *edit_label = "EDIT";
+	int edit_col = (E.screencols - (int)strlen(edit_label)) / 2;
+	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", center_y + 8, edit_col + 1);
+	abAppend(&ab, buf, strlen(buf));
+	setThemeBgColor(&ab, E.theme.bg);
+	setThemeColor(&ab, E.theme.border);
+	abAppend(&ab, edit_label, strlen(edit_label));
+
 	char version[80];
-	snprintf(version, sizeof(version), "HAKO v%s", HAKO_VERSION);
+	snprintf(version, sizeof(version), "HAKE v%s", HAKE_VERSION);
 	int ver_col = (E.screencols - strlen(version)) / 2;
 	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", center_y + 9, ver_col + 1);
 	abAppend(&ab, buf, strlen(buf));
@@ -6784,14 +6830,14 @@ void editorToggleExplorer() {
 
 /*** AI assistant ***/
 void editorInitAI() {
-	E.claw_session_id = NULL;
-	E.claw_session_turns = 0;
-	E.claw_session_resumed = 0;
+	E.hako_session_id = NULL;
+	E.hako_session_turns = 0;
+	E.hako_session_resumed = 0;
 }
 
 void editorCleanupAI() {
-	free(E.claw_session_id);
-	E.claw_session_id = NULL;
+	free(E.hako_session_id);
+	E.hako_session_id = NULL;
 }
 
 void aiInit(editorPane *pane) {
@@ -6827,16 +6873,16 @@ void aiInit(editorPane *pane) {
 
 	char line[128];
 	data->history[data->history_count++] = strdup("-----");
-	snprintf(line, sizeof(line), "%s (powered by hakoc)", E.ai_name);
+	snprintf(line, sizeof(line), "%s (powered by hako)", E.ai_name);
 	data->history[data->history_count++] = strdup(line);
 	data->history[data->history_count++] = strdup("-----");
 
 	pane->ai = data;
 
-	if (clawLaunch(data) < 0) {
-		data->history[data->history_count++] = strdup("hakoc not found.");
+	if (hakoLaunch(data) < 0) {
+		data->history[data->history_count++] = strdup("hako not found.");
 		data->history[data->history_count++] = strdup("Install: curl -fsSL https://mithraeums.github.io/install.sh | sh");
-		data->history[data->history_count++] = strdup("Or: make BUNDLE_CLAW=1 from hako source.");
+		data->history[data->history_count++] = strdup("Or: make BUNDLE_HAKO=1 from hake source.");
 		data->history[data->history_count++] = strdup("'i' to try again | /help");
 	} else {
 		data->history[data->history_count++] = strdup("'i' chat | /help");
@@ -7479,18 +7525,18 @@ void aiRender(editorPane *pane, struct abuf *ab) {
 	(void)ab;
 }
 
-/*** claw pipe client ***/
+/*** hako agent pipe client ***/
 
-/* Persistent subprocess: hako speaks JSONL over stdin/stdout to hakoc --pipe.
-   stdin  (to hakoc)   ← {"type":"prompt","text":"..."} | {"type":"slash","cmd":"..."} | {"type":"quit"}
-   stdout (from hakoc) → {"type":"init",...} | {"type":"message",...} | {"type":"tool_start/end",...} | {"type":"done",...} */
+/* Persistent subprocess: hako speaks JSONL over stdin/stdout to hako --pipe.
+   stdin  (to hako)   ← {"type":"prompt","text":"..."} | {"type":"slash","cmd":"..."} | {"type":"quit"}
+   stdout (from hako) → {"type":"init",...} | {"type":"message",...} | {"type":"tool_start/end",...} | {"type":"done",...} */
 
-static int   g_claw_fd_write      = -1;
-static FILE *g_claw_fp_read       = NULL;
-static pid_t g_claw_pid           = -1;
-static pthread_t g_claw_reader;
-static int g_claw_reader_running  = 0;
-static aiData *g_claw_data        = NULL;
+static int   g_hako_fd_write      = -1;
+static FILE *g_hako_fp_read       = NULL;
+static pid_t g_hako_pid           = -1;
+static pthread_t g_hako_reader;
+static int g_hako_reader_running  = 0;
+static aiData *g_hako_data        = NULL;
 
 static char *hkExtractJsonString(const char *src, const char *key) {
 	char pat[64];
@@ -7520,7 +7566,7 @@ static int hkExtractJsonInt(const char *src, const char *key) {
 	return atoi(p);
 }
 
-static void clawJsonEsc(const char *src, char *dst, int dsz) {
+static void hakoJsonEsc(const char *src, char *dst, int dsz) {
 	int d = 0;
 	for (const char *p = src; *p && d < dsz - 2; p++) {
 		unsigned char c = (unsigned char)*p;
@@ -7534,19 +7580,19 @@ static void clawJsonEsc(const char *src, char *dst, int dsz) {
 	dst[d] = '\0';
 }
 
-static void clawSendLine(const char *json) {
-	if (g_claw_fd_write < 0) return;
+static void hakoSendLine(const char *json) {
+	if (g_hako_fd_write < 0) return;
 	size_t len = strlen(json);
-	ssize_t w1 = write(g_claw_fd_write, json, len);
-	ssize_t w2 = write(g_claw_fd_write, "\n", 1);
+	ssize_t w1 = write(g_hako_fd_write, json, len);
+	ssize_t w2 = write(g_hako_fd_write, "\n", 1);
 	if (w1 < 0 || w2 < 0) {
-		/* pipe broken — hakoc died. mark as gone so further sends no-op. */
-		close(g_claw_fd_write);
-		g_claw_fd_write = -1;
+		/* pipe broken — hako died. mark as gone so further sends no-op. */
+		close(g_hako_fd_write);
+		g_hako_fd_write = -1;
 	}
 }
 
-/* history helpers — display only; hakoc owns the API message stack */
+/* history helpers — display only; hako owns the API message stack */
 
 void aiAddHistory(aiData *data, const char *text);
 
@@ -7603,7 +7649,7 @@ void aiAddHistory(aiData *data, const char *text) {
 	aiAddHistoryRole(data, text, HK_ROLE_SYSTEM);
 }
 
-static void clawHandleEvent(aiData *data, const char *line) {
+static void hakoHandleEvent(aiData *data, const char *line) {
 	char *type = hkExtractJsonString(line, "type");
 	if (!type) return;
 
@@ -7614,10 +7660,10 @@ static void clawHandleEvent(aiData *data, const char *line) {
 		char *provider = hkExtractJsonString(line, "provider");
 		char *model    = hkExtractJsonString(line, "model");
 
-		free(E.claw_session_id);
-		E.claw_session_id      = session ? session : strdup("");
-		E.claw_session_turns   = turns > 0 ? turns : 0;
-		E.claw_session_resumed = resumed > 0 ? 1 : 0;
+		free(E.hako_session_id);
+		E.hako_session_id      = session ? session : strdup("");
+		E.hako_session_turns   = turns > 0 ? turns : 0;
+		E.hako_session_resumed = resumed > 0 ? 1 : 0;
 
 		pthread_mutex_lock(&data->lock);
 		char info[256];
@@ -7628,8 +7674,8 @@ static void clawHandleEvent(aiData *data, const char *line) {
 				(model && *model) ? model : "");
 			aiAddHistory(data, info);
 		}
-		if (E.claw_session_resumed && E.claw_session_turns > 0) {
-			snprintf(info, sizeof(info), "session: resumed (%d turns)", E.claw_session_turns);
+		if (E.hako_session_resumed && E.hako_session_turns > 0) {
+			snprintf(info, sizeof(info), "session: resumed (%d turns)", E.hako_session_turns);
 			aiAddHistory(data, info);
 		} else {
 			aiAddHistory(data, "session: new");
@@ -7684,9 +7730,9 @@ static void clawHandleEvent(aiData *data, const char *line) {
 		int turn    = hkExtractJsonInt(line, "turn");
 		char *session = hkExtractJsonString(line, "session");
 
-		free(E.claw_session_id);
-		E.claw_session_id    = session ? session : strdup("");
-		E.claw_session_turns = turn > 0 ? turn : E.claw_session_turns;
+		free(E.hako_session_id);
+		E.hako_session_id    = session ? session : strdup("");
+		E.hako_session_turns = turn > 0 ? turn : E.hako_session_turns;
 
 		pthread_mutex_lock(&data->lock);
 		if (data->stream_slot >= 0) {
@@ -7733,24 +7779,24 @@ static void clawHandleEvent(aiData *data, const char *line) {
 	free(type);
 }
 
-static void *clawReaderThread(void *arg) {
+static void *hakoReaderThread(void *arg) {
 	aiData *data = (aiData *)arg;
 	char line[65536];
-	while (g_claw_fp_read && fgets(line, sizeof(line), g_claw_fp_read)) {
+	while (g_hako_fp_read && fgets(line, sizeof(line), g_hako_fp_read)) {
 		int len = (int)strlen(line);
 		while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
 		if (len == 0) continue;
-		clawHandleEvent(data, line);
+		hakoHandleEvent(data, line);
 		E.full_redraw_pending = 1;
 	}
 	pthread_mutex_lock(&data->lock);
 	data->streaming = 0;
 	pthread_mutex_unlock(&data->lock);
-	g_claw_reader_running = 0;
+	g_hako_reader_running = 0;
 	return NULL;
 }
 
-static char *clawFindBinary(void) {
+static char *hakoFindBinary(void) {
 	char buf[PATH_MAX];
 
 	/* 1. Same dir as the running hako binary (bundled install). */
@@ -7764,7 +7810,7 @@ static char *clawFindBinary(void) {
 				if (slash) {
 					*slash = '\0';
 					char cand[PATH_MAX];
-					snprintf(cand, sizeof(cand), "%s/hakoc", real);
+					snprintf(cand, sizeof(cand), "%s/hako", real);
 					if (access(cand, X_OK) == 0) return strdup(cand);
 				}
 			}
@@ -7779,36 +7825,36 @@ static char *clawFindBinary(void) {
 			if (slash) {
 				*slash = '\0';
 				char cand[PATH_MAX];
-				snprintf(cand, sizeof(cand), "%s/hakoc", buf);
+				snprintf(cand, sizeof(cand), "%s/hako", buf);
 				if (access(cand, X_OK) == 0) return strdup(cand);
 			}
 		}
 	}
 #endif
 
-	/* 2. cwd/hakoc (dev convenience). */
-	if (access("./hakoc", X_OK) == 0) return strdup("./hakoc");
+	/* 2. cwd/hako (dev convenience). */
+	if (access("./hako", X_OK) == 0) return strdup("./hako");
 
-	/* 3. ~/.local/bin/hakoc */
+	/* 3. ~/.local/bin/hako */
 	const char *home = getenv("HOME");
 	if (home) {
-		snprintf(buf, sizeof(buf), "%s/.local/bin/hakoc", home);
+		snprintf(buf, sizeof(buf), "%s/.local/bin/hako", home);
 		if (access(buf, X_OK) == 0) return strdup(buf);
 	}
 
-	/* 4. /usr/local/bin/hakoc */
-	if (access("/usr/local/bin/hakoc", X_OK) == 0) return strdup("/usr/local/bin/hakoc");
+	/* 4. /usr/local/bin/hako */
+	if (access("/usr/local/bin/hako", X_OK) == 0) return strdup("/usr/local/bin/hako");
 
 	/* 5. PATH lookup (execvp will search). */
-	return strdup("hakoc");
+	return strdup("hako");
 }
 
-static int clawLaunch(aiData *data) {
+static int hakoLaunch(aiData *data) {
 #ifdef _WIN32
 	(void)data;
 	return -1;
 #else
-	char *bin = clawFindBinary();
+	char *bin = hakoFindBinary();
 	int to_child[2], from_child[2];
 	if (pipe(to_child)   < 0 ||
 	    pipe(from_child) < 0) { free(bin); return -1; }
@@ -7830,59 +7876,59 @@ static int clawLaunch(aiData *data) {
 	close(to_child[0]);
 	close(from_child[1]);
 	free(bin);
-	g_claw_fd_write     = to_child[1];
-	g_claw_fp_read      = fdopen(from_child[0], "r");
-	g_claw_pid          = pid;
-	g_claw_data         = data;
-	g_claw_reader_running = 1;
-	if (pthread_create(&g_claw_reader, NULL, clawReaderThread, data) != 0) {
-		fclose(g_claw_fp_read); g_claw_fp_read  = NULL;
-		close(g_claw_fd_write); g_claw_fd_write = -1;
-		g_claw_pid            = -1;
-		g_claw_reader_running = 0;
+	g_hako_fd_write     = to_child[1];
+	g_hako_fp_read      = fdopen(from_child[0], "r");
+	g_hako_pid          = pid;
+	g_hako_data         = data;
+	g_hako_reader_running = 1;
+	if (pthread_create(&g_hako_reader, NULL, hakoReaderThread, data) != 0) {
+		fclose(g_hako_fp_read); g_hako_fp_read  = NULL;
+		close(g_hako_fd_write); g_hako_fd_write = -1;
+		g_hako_pid            = -1;
+		g_hako_reader_running = 0;
 		return -1;
 	}
-	pthread_detach(g_claw_reader);
+	pthread_detach(g_hako_reader);
 	return 0;
 #endif
 }
 
-static void clawShutdown(void) {
+static void hakoShutdown(void) {
 #ifndef _WIN32
-	if (g_claw_fd_write >= 0) {
+	if (g_hako_fd_write >= 0) {
 		const char *quit = "{\"type\":\"quit\"}\n";
-		ssize_t w = write(g_claw_fd_write, quit, strlen(quit));
+		ssize_t w = write(g_hako_fd_write, quit, strlen(quit));
 		(void)w;
-		close(g_claw_fd_write);
-		g_claw_fd_write = -1;
+		close(g_hako_fd_write);
+		g_hako_fd_write = -1;
 	}
-	if (g_claw_fp_read) {
-		fclose(g_claw_fp_read);
-		g_claw_fp_read = NULL;
+	if (g_hako_fp_read) {
+		fclose(g_hako_fp_read);
+		g_hako_fp_read = NULL;
 	}
-	if (g_claw_pid > 0) {
-		/* graceful: hakoc sees quit on stdin or EOF, exits.
+	if (g_hako_pid > 0) {
+		/* graceful: hako sees quit on stdin or EOF, exits.
 		   If still alive after a beat, SIGTERM. Reap to avoid zombie. */
 		for (int i = 0; i < 20; i++) {
-			pid_t r = waitpid(g_claw_pid, NULL, WNOHANG);
-			if (r == g_claw_pid || r < 0) break;
+			pid_t r = waitpid(g_hako_pid, NULL, WNOHANG);
+			if (r == g_hako_pid || r < 0) break;
 			usleep(10000); /* 10ms */
 		}
-		if (waitpid(g_claw_pid, NULL, WNOHANG) == 0) {
-			kill(g_claw_pid, SIGTERM);
-			waitpid(g_claw_pid, NULL, 0);
+		if (waitpid(g_hako_pid, NULL, WNOHANG) == 0) {
+			kill(g_hako_pid, SIGTERM);
+			waitpid(g_hako_pid, NULL, 0);
 		}
-		g_claw_pid = -1;
+		g_hako_pid = -1;
 	}
-	g_claw_reader_running = 0;
-	g_claw_data           = NULL;
+	g_hako_reader_running = 0;
+	g_hako_data           = NULL;
 #endif
 }
 
 void aiWorkerSend(aiData *data) {
 	if (!data) return;
 	if (data->streaming) return;
-	if (g_claw_fd_write < 0) {
+	if (g_hako_fd_write < 0) {
 		pthread_mutex_lock(&data->lock);
 		aiAddHistory(data, "Rei not connected. Close and reopen (:q rei, then :rei).");
 		pthread_mutex_unlock(&data->lock);
@@ -7890,27 +7936,27 @@ void aiWorkerSend(aiData *data) {
 	}
 	data->streaming = 1;
 	char esc[8192];
-	clawJsonEsc(data->current_prompt ? data->current_prompt : "", esc, sizeof(esc));
+	hakoJsonEsc(data->current_prompt ? data->current_prompt : "", esc, sizeof(esc));
 	char json[8256];
 	snprintf(json, sizeof(json), "{\"type\":\"prompt\",\"text\":\"%s\"}", esc);
-	clawSendLine(json);
+	hakoSendLine(json);
 }
 
 int hkHandleSlash(aiData *data, const char *prompt) {
 	if (!data) return 0;
 	if (strcmp(prompt, "/quit") == 0 || strcmp(prompt, "/q") == 0) return 2;
-	if (g_claw_fd_write < 0) {
+	if (g_hako_fd_write < 0) {
 		pthread_mutex_lock(&data->lock);
 		aiAddHistory(data, "Rei not connected.");
 		pthread_mutex_unlock(&data->lock);
 		return 0;
 	}
 	char esc[4096];
-	clawJsonEsc(prompt, esc, sizeof(esc));
+	hakoJsonEsc(prompt, esc, sizeof(esc));
 	char json[4160];
 	snprintf(json, sizeof(json), "{\"type\":\"slash\",\"cmd\":\"%s\"}", esc);
 	data->streaming = 1;
-	clawSendLine(json);
+	hakoSendLine(json);
 	return 0;
 }
 
@@ -7947,8 +7993,8 @@ void editorGenerateConfig(void) {
 
 	fprintf(fp, "# ============================================================\n");
 	fprintf(fp, "#  零 Rei — AI assistant (right panel)\n");
-	fprintf(fp, "#  Rei is powered by hakoc. Configure AI in ~/.hakocrc\n");
-	fprintf(fp, "#  Run: hakoc --help  |  man page: https://mithraeums.github.io\n");
+	fprintf(fp, "#  Rei is powered by hako. Configure AI in ~/.hakocrc\n");
+	fprintf(fp, "#  Run: hako --help  |  man page: https://mithraeums.github.io\n");
 	fprintf(fp, "# ============================================================\n\n");
 
 	fprintf(fp, "# ============================================================\n");
@@ -8254,7 +8300,7 @@ int editorApplyThemeByName(const char *name) {
 	return 1;
 }
 
-/* Mithraeum default — void/paper/gold/rust. Matches site banners + claw/hako icons. */
+/* Mithraeum default — void/paper/gold/rust. Matches site banners + hako-code/hake icons. */
 void initTheme() {
 	E.theme_preset = THEME_MITHRAEUM;
 	E.theme.bg           = (Color){15, 14, 12};       /* void */
@@ -8356,7 +8402,7 @@ void editorLoadConfig() {
 		} else if (strcmp(key, "theme") == 0) {
 			editorApplyThemeByName(val);
 		} else if (strncmp(key, "ai_", 3) == 0) {
-			/* AI config moved to ~/.hakocrc (read by hakoc) */
+			/* AI config moved to ~/.hakocrc (read by hako) */
 			(void)val;
 		} else if (strncmp(key, "theme_", 6) == 0) {
 			int r, g, b;
@@ -8526,11 +8572,11 @@ void editorCleanup() {
 int main(int argc, char *argv[]) {
 	if (argc >= 2) {
 		if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
-			printf("%s", HAKO_HELP_TEXT);
+			printf("%s", HAKE_HELP_TEXT);
 			return 0;
 		}
 		if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
-			printf("hako version %s\n", HAKO_VERSION);
+			printf("hake (hako-edit) version %s\n", HAKE_VERSION);
 			return 0;
 		}
 	}
@@ -8547,7 +8593,7 @@ int main(int argc, char *argv[]) {
 	if (sigaction(SIGWINCH, &sa, NULL) == -1) {
 		die("sigaction");
 	}
-	/* hakoc subprocess can die mid-turn — don't let SIGPIPE kill the editor */
+	/* hako subprocess can die mid-turn — don't let SIGPIPE kill the editor */
 	signal(SIGPIPE, SIG_IGN);
 #endif
 
@@ -8556,7 +8602,7 @@ int main(int argc, char *argv[]) {
 		editorOpen(argv[1]);
 	}
 
-	editorSetStatusMessage("HAKO v%s | :help for commands", HAKO_VERSION);
+	editorSetStatusMessage("HAKE v%s | :help for commands", HAKE_VERSION);
 	while (1) {
 		editorRefreshScreen();
 		editorProcessKeyPress();

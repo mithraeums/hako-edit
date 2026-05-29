@@ -1,13 +1,13 @@
 #!/usr/bin/env sh
-# hako installer. Fetches latest GitHub release for current OS/arch.
-# Usage:  curl -fsSL https://raw.githubusercontent.com/mithraeums/hako/main/install.sh | sh
-# Env:    REPO=owner/hako        (override default)
+# hake installer. Fetches latest GitHub release for current OS/arch.
+# Usage:  curl -fsSL https://raw.githubusercontent.com/mithraeums/hako-edit/main/install.sh | sh
+# Env:    REPO=owner/hako-edit       (override default)
 #         PREFIX=/usr/local      (install dir; defaults to ~/.local if not writable)
 #         VERIFY=0               (skip sha256 verify; default 1)
 
 set -eu
 
-REPO="${REPO:-mithraeums/hako}"
+REPO="${REPO:-mithraeums/hako-edit}"
 PREFIX="${PREFIX:-}"
 VERIFY="${VERIFY:-1}"
 
@@ -16,15 +16,15 @@ uname_m="$(uname -m)"
 
 case "$uname_s" in
 	Linux*)
-		asset="hako-linux.tar.gz"; dirname="hako-linux"; bin=hako; ext=tar.gz
+		asset="hake-linux.tar.gz"; dirname="hake-linux"; bin=hake; ext=tar.gz
 		;;
 	Darwin*)
-		asset="hako-macos.tar.gz"; dirname="hako-macos"; bin=hako; ext=tar.gz
+		asset="hake-macos.tar.gz"; dirname="hake-macos"; bin=hake; ext=tar.gz
 		;;
 	MINGW*|MSYS*|CYGWIN*)
-		asset="hako-windows.zip"; dirname="hako-windows"; bin=hako.exe; ext=zip
+		asset="hake-windows.zip"; dirname="hake-windows"; bin=hake.exe; ext=zip
 		;;
-	*) echo "unsupported OS: $uname_s — try building from source (gcc -O2 -Wall hako.c -o hako -lpthread)" >&2; exit 1 ;;
+	*) echo "unsupported OS: $uname_s — try building from source (gcc -O2 -Wall hake.c -o hake -lpthread)" >&2; exit 1 ;;
 esac
 
 base="${REPO}"

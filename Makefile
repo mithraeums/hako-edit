@@ -1,21 +1,27 @@
-# HAKO — minimal cross-platform build with icon
+# hake (hako-edit) — minimal cross-platform build with icon
 #
 # Windows: icon embedded into .exe via windres (real OS icon).
 # macOS:   icon attached via Rez/SetFile if Xcode CLT installed (best-effort);
-#          otherwise icon/hako.icns is shipped alongside.
-# Linux:   ELF can't embed icons; icon/hako.png is shipped alongside for use
+#          otherwise icon/hake.icns is shipped alongside.
+# Linux:   ELF can't embed icons; icon/hake.png is shipped alongside for use
 #          with a .desktop entry.
+#
+# BUNDLE_HAKO=1 (default): also build the `hako` agent binary from ../hako-code/hako.c.
+#   hake will find and spawn it at runtime for the Rei panel.
+# BUNDLE_HAKO=0: build hake only. Rei pane shows "not found" until hako installed.
 
-CC      ?= gcc
-CFLAGS  ?= -O2 -Wall
-LDLIBS  ?= -lpthread
+CC          ?= gcc
+CFLAGS      ?= -O2 -Wall
+LDLIBS      ?= -lpthread
+BUNDLE_HAKO ?= 1
+HAKO_SRC    ?= ../hako-code/hako.c
 
 ICON_DIR = icon
-BIN      = hako
+BIN      = hake
 
 ifeq ($(OS),Windows_NT)
     PLATFORM = windows
-    BIN     := hako.exe
+    BIN     := hake.exe
 else
     UNAME_S := $(shell uname -s)
     ifeq ($(UNAME_S),Darwin)
@@ -25,11 +31,21 @@ else
     endif
 endif
 
-.PHONY: all clean icons
-all: $(BIN)
+ifeq ($(BUNDLE_HAKO),1)
+TARGETS = $(BIN) hako
+else
+TARGETS = $(BIN)
+endif
+
+.PHONY: all clean icons install uninstall
+all: $(TARGETS)
+
+# Build the `hako` agent alongside hake when BUNDLE_HAKO=1.
+hako: $(HAKO_SRC)
+	$(CC) $(CFLAGS) $< -o $@ $(LDLIBS)
 
 # ---------- icons ----------
-# Regenerate icon/hako.{icns,ico,png} from icon/hako.svg.
+# Regenerate icon/hake.{icns,ico,png} from icon/hake.svg.
 # Requires rsvg-convert or ImageMagick. iconutil (macOS) → .icns, magick → .ico.
 icons:
 	@cd $(ICON_DIR) && bash build-icons.sh
@@ -37,20 +53,20 @@ icons:
 # ---------- Windows: embed icon via resource (optional — skip if .ico missing) ----------
 ifeq ($(PLATFORM),windows)
 
-HAS_ICO := $(wildcard $(ICON_DIR)/hako.ico)
+HAS_ICO := $(wildcard $(ICON_DIR)/hake.ico)
 
 ifeq ($(HAS_ICO),)
-$(BIN): hako.c
-	$(CC) $(CFLAGS) hako.c -o $@ $(LDLIBS)
+$(BIN): hake.c
+	$(CC) $(CFLAGS) hake.c -o $@ $(LDLIBS)
 else
-hako.rc:
-	@printf 'IDI_ICON1 ICON "$(ICON_DIR)/hako.ico"\n' > $@
+hake.rc:
+	@printf 'IDI_ICON1 ICON "$(ICON_DIR)/hake.ico"\n' > $@
 
-hako.res: hako.rc $(ICON_DIR)/hako.ico
+hake.res: hake.rc $(ICON_DIR)/hake.ico
 	windres $< -O coff -o $@
 
-$(BIN): hako.c hako.res
-	$(CC) $(CFLAGS) hako.c hako.res -o $@ $(LDLIBS)
+$(BIN): hake.c hake.res
+	$(CC) $(CFLAGS) hake.c hake.res -o $@ $(LDLIBS)
 endif
 
 endif
@@ -58,13 +74,13 @@ endif
 # ---------- macOS: build, then attach icon if tools exist ----------
 ifeq ($(PLATFORM),macos)
 
-$(BIN): hako.c
+$(BIN): hake.c
 	$(CC) $(CFLAGS) $< -o $@ $(LDLIBS)
 	@if command -v Rez >/dev/null 2>&1 && command -v SetFile >/dev/null 2>&1; then \
-		printf 'read %c%s%c (-16455) "%s/hako.icns";\n' "'" "icns" "'" "$(ICON_DIR)" > .hako.r; \
-		Rez -append .hako.r -o $(BIN) && SetFile -a C $(BIN) && \
+		printf 'read %c%s%c (-16455) "%s/hake.icns";\n' "'" "icns" "'" "$(ICON_DIR)" > .hake.r; \
+		Rez -append .hake.r -o $(BIN) && SetFile -a C $(BIN) && \
 		echo "icon attached to $(BIN)" || echo "icon attach failed (non-fatal)"; \
-		rm -f .hako.r; \
+		rm -f .hake.r; \
 	else \
 		echo "Rez/SetFile not found — install Xcode CLT to attach icon (xcode-select --install)"; \
 	fi
@@ -74,11 +90,51 @@ endif
 # ---------- Linux: plain build, icon shipped alongside ----------
 ifeq ($(PLATFORM),linux)
 
-$(BIN): hako.c
+$(BIN): hake.c
 	$(CC) $(CFLAGS) $< -o $@ $(LDLIBS)
-	@echo "built $(BIN). For a desktop icon: copy $(ICON_DIR)/hako.png to ~/.local/share/icons/ and create a .desktop entry."
+	@echo "built $(BIN). For a desktop icon: copy $(ICON_DIR)/hake.png to ~/.local/share/icons/ and create a .desktop entry."
 
 endif
 
 clean:
-	rm -f hako hako.exe hako.rc hako.res .hako.r
+	rm -f hake hake.exe hako hake.rc hake.res .hake.r
+
+# ---------- install / uninstall ----------
+PREFIX ?=
+ICONS  ?= 1
+
+_uname_s := $(shell uname -s 2>/dev/null)
+_resolve_prefix = $(if $(PREFIX),$(PREFIX),$(if $(shell test -w /usr/local/bin && echo y),/usr/local,$(HOME)/.local))
+
+install: $(BIN)
+	@dest="$(_resolve_prefix)"; \
+	mkdir -p "$$dest/bin"; \
+	install -m 0755 $(BIN) "$$dest/bin/$(BIN)"; \
+	echo "installed: $$dest/bin/$(BIN)"; \
+	if [ -f hako ]; then \
+		install -m 0755 hako "$$dest/bin/hako-bundled"; \
+		echo "installed: $$dest/bin/hako-bundled (BUNDLE_HAKO subprocess wire)"; \
+	fi; \
+	if [ "$(_uname_s)" = "Darwin" ] && command -v xattr >/dev/null 2>&1; then \
+		xattr -d com.apple.quarantine "$$dest/bin/$(BIN)" 2>/dev/null || true; \
+	fi; \
+	if [ "$(_uname_s)" = "Linux" ] && [ "$(ICONS)" = "1" ] && [ -f $(ICON_DIR)/hake.png ]; then \
+		mkdir -p "$$HOME/.local/share/applications" "$$HOME/.local/share/icons/hicolor/256x256/apps"; \
+		install -m 0644 $(ICON_DIR)/hake.png "$$HOME/.local/share/icons/hicolor/256x256/apps/hake.png"; \
+		printf "[Desktop Entry]\nType=Application\nName=hake\nComment=Mithraeum modal terminal editor\nExec=$$dest/bin/$(BIN)\nIcon=hake\nTerminal=true\nCategories=Development;TextEditor;\n" > "$$HOME/.local/share/applications/hake.desktop"; \
+		echo "installed: icon + .desktop entry"; \
+	fi; \
+	case ":$$PATH:" in *":$$dest/bin:"*) ;; *) echo "note: $$dest/bin not in PATH";; esac
+
+uninstall:
+	@for prefix in $(PREFIX) /usr/local $$HOME/.local /opt/local /opt; do \
+		[ -z "$$prefix" ] && continue; \
+		for b in $(BIN) hako-bundled; do \
+			path="$$prefix/bin/$$b"; \
+			if [ -e "$$path" ] || [ -L "$$path" ]; then rm -f "$$path" && echo "removed: $$path"; fi; \
+		done; \
+	done
+	@rm -f "$$HOME/.local/share/applications/hake.desktop" 2>/dev/null || true
+	@for d in $$HOME/.local/share/icons/hicolor/*/apps; do \
+		[ -d "$$d" ] && rm -f "$$d/hake.png" 2>/dev/null; \
+	done

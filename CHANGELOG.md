@@ -1,7 +1,22 @@
 # Changelog
 
-All notable changes to hako. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+All notable changes to hako-edit (binary: `hake`). Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows semver (`v0.x.y` is pre-1.0; expect breaking changes between minor versions).
+
+## [v0.1.3] — 2026-05-25
+
+### Fixed — clipboard fidelity
+- **`hkSystemClipboardWrite` / `hkSystemClipboardRead`** — OS-aware transport replaces the old `xclip … 2>/dev/null || pbcopy …` chain. macOS picks `pbcopy`, Wayland picks `wl-copy`, X11 picks `xclip -selection clipboard -i`, Windows picks `clip`. The old shell `||` chain leaked the first chunk of large yanks on macOS (xclip-not-found path) and dropped non-newline trailing bytes via `fgets`-based reader. Tabs / indents / multi-line code now survive round-trip yank-out → external paste verbatim.
+- **`editorPasteFromSystemClipboard`** — rewritten to walk bytes verbatim (no more `fgets` line buffering). Tab characters preserved; raw control bytes silently dropped.
+
+### Added — naming rename
+- **CLI: `hako` → `hake`.** Repo: `mithraeums/hako` → `mithraeums/hako-edit` (GitHub auto-redirects old URL). Source file: `hako.c` → `hake.c`. Macros: `HAKO_VERSION` / `HAKO_HELP_TEXT` / `HAKO_HL_*` / `HAKO_TRACE` → `HAKE_*`. Status bar / splash / `--help` / `--version` updated. Splash gains an `EDIT` line under the block-letter logo (above the kanji 箱).
+- **Subprocess wire renamed.** Internal `claw*` symbols → `hako*` (the wire targets the v0.1.6 `hako` agent, not the legacy `claw` name). Binary lookup chain now searches for `hako` on `PATH` / `./hako` / `~/.local/bin/hako` / `/usr/local/bin/hako`.
+- **`BUNDLE_HAKO` Makefile flag** (was `BUNDLE_CLAW`). Default `1` — `make` compiles `../hako-code/hako.c` into a bundled `hako` agent next to `hake`. `make BUNDLE_HAKO=0` builds the editor alone.
+
+### Notes
+- `~/.hakorc` is shared with the `hako` agent (the agent moved off `~/.hakocrc` in v0.1.6). Editor reads its own keys; AI keys are read by the spawned agent.
+- The v0.1.6 hako-code companion ships an auto-migrator for `~/.hakoc/` → `~/.hako/`. The editor needs no migrator since it never wrote to either path.
 
 ## [v0.1.2]
 
