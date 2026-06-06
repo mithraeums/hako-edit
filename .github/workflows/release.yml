@@ -59,7 +59,7 @@ jobs:
           make BUNDLE_HAKO=0
           ./hake --version
           mkdir -p ${{ matrix.staging }}
-          cp hake README.md LICENSE.txt ${{ matrix.staging }}/
+          cp hake README.md LICENSE ${{ matrix.staging }}/
           [ -f icon/hake.png ] && cp icon/hake.png ${{ matrix.staging }}/ || true
           tar czf ${{ matrix.artifact }} ${{ matrix.staging }}
           (cd ${{ matrix.staging }} && sha256sum hake > ../${{ matrix.sha }})
@@ -71,7 +71,7 @@ jobs:
           ./hake --version
           file hake
           mkdir -p ${{ matrix.staging }}
-          cp hake README.md LICENSE.txt ${{ matrix.staging }}/
+          cp hake README.md LICENSE ${{ matrix.staging }}/
           [ -f icon/hake.icns ] && cp icon/hake.icns ${{ matrix.staging }}/ || true
           tar czf ${{ matrix.artifact }} ${{ matrix.staging }}
           (cd ${{ matrix.staging }} && shasum -a 256 hake > ../${{ matrix.sha }})
@@ -96,7 +96,7 @@ jobs:
           make CC=gcc BUNDLE_HAKO=0
           ./hake.exe --version
           mkdir -p ${{ matrix.staging }}
-          cp hake.exe README.md LICENSE.txt ${{ matrix.staging }}/
+          cp hake.exe README.md LICENSE ${{ matrix.staging }}/
           [ -f icon/hake.ico ] && cp icon/hake.ico ${{ matrix.staging }}/ || true
           zip -r ${{ matrix.artifact }} ${{ matrix.staging }}
           (cd ${{ matrix.staging }} && sha256sum hake.exe > ../${{ matrix.sha }})
@@ -127,7 +127,7 @@ jobs:
             gmake CC=gcc BUNDLE_HAKO=0
             ./hake --version
             mkdir -p hake-freebsd-x86_64
-            cp hake README.md LICENSE.txt hake-freebsd-x86_64/
+            cp hake README.md LICENSE hake-freebsd-x86_64/
             tar czf hake-freebsd-x86_64.tar.gz hake-freebsd-x86_64
             (cd hake-freebsd-x86_64 && printf '%s  hake\n' "$(sha256 -q hake)" > ../hake-freebsd-x86_64.sha256)
 
