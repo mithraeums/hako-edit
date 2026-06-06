@@ -3,6 +3,18 @@
 All notable changes to hako-edit (binary: `hake`). Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows semver (`v0.x.y` is pre-1.0; expect breaking changes between minor versions).
 
+## [v0.1.4] — 2026-06-05
+
+### Fixed — bundled agent discovery
+- **`hakoFindBinary` now finds `hako-bundled`.** `BUNDLE_HAKO=1 make install` drops the agent as `hako-bundled` (to avoid clobbering a standalone `hako`), but the finder only looked for `hako` — so a bundle-only install was invisible and the Rei pane showed "not found". The finder now tries `hako` then `hako-bundled` at each location (exe dir → cwd → `~/.local/bin` → `/usr/local/bin` → PATH), preferring a standalone `hako`.
+
+### Changed — suite alignment (hako-code v0.1.8 / flattened engine)
+- The embedded agent runs as a `--pipe` subprocess and is the *same* binary as the standalone `hako`: `:pull hako-sho` / `:model` / the `hakm` engine all work identically inside the editor. No ollama, no in-process engine link (the old `BUNDLE_HAKO` engine-link concern is moot — the agent spawns `hakm` as a subprocess).
+- Sharper "agent not found" guidance in the Rei pane: `hako.sh` installer, bundled-rebuild hint, and the `:pull hako-sho` next step.
+
+### Removed
+- Duplicate `LICENSE.txt` (GPL-3.0 lives in `LICENSE`).
+
 ## [v0.1.3] — 2026-05-25
 
 ### Fixed — clipboard fidelity

@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 				
 /*** includes ***/
-#define HAKE_VERSION "0.1.3"
+#define HAKE_VERSION "0.1.4"
 
 #include <ctype.h>
 #include <errno.h>
@@ -6880,9 +6880,10 @@ void aiInit(editorPane *pane) {
 	pane->ai = data;
 
 	if (hakoLaunch(data) < 0) {
-		data->history[data->history_count++] = strdup("hako not found.");
-		data->history[data->history_count++] = strdup("Install: curl -fsSL https://mithraeums.github.io/install.sh | sh");
-		data->history[data->history_count++] = strdup("Or: make BUNDLE_HAKO=1 from hake source.");
+		data->history[data->history_count++] = strdup("hako agent not found.");
+		data->history[data->history_count++] = strdup("install: curl -fsSL https://mithraeums.github.io/hako.sh | sh");
+		data->history[data->history_count++] = strdup("or rebuild bundled: make BUNDLE_HAKO=1 (from hake source).");
+		data->history[data->history_count++] = strdup("then reopen — the agent runs here; :pull hako-sho for a local model.");
 		data->history[data->history_count++] = strdup("'i' to try again | /help");
 	} else {
 		data->history[data->history_count++] = strdup("'i' chat | /help");
@@ -7796,10 +7797,24 @@ static void *hakoReaderThread(void *arg) {
 	return NULL;
 }
 
+/* Try <dir>/hako, then <dir>/hako-bundled (the BUNDLE_HAKO install name). Prefers
+   a standalone `hako` (user-installed / self-updated) over the bundled copy.
+   Returns malloc'd path to the first executable found, or NULL. */
+static char *hakoTryDir(const char *dir) {
+	static const char *names[] = { "hako", "hako-bundled" };
+	for (int i = 0; i < 2; i++) {
+		char cand[PATH_MAX];
+		snprintf(cand, sizeof(cand), "%s/%s", dir, names[i]);
+		if (access(cand, X_OK) == 0) return strdup(cand);
+	}
+	return NULL;
+}
+
 static char *hakoFindBinary(void) {
 	char buf[PATH_MAX];
+	char *found;
 
-	/* 1. Same dir as the running hako binary (bundled install). */
+	/* 1. Same dir as the running hake binary (bundled install). */
 #ifdef __APPLE__
 	{
 		uint32_t sz = sizeof(buf);
@@ -7807,12 +7822,7 @@ static char *hakoFindBinary(void) {
 			char real[PATH_MAX];
 			if (realpath(buf, real)) {
 				char *slash = strrchr(real, '/');
-				if (slash) {
-					*slash = '\0';
-					char cand[PATH_MAX];
-					snprintf(cand, sizeof(cand), "%s/hako", real);
-					if (access(cand, X_OK) == 0) return strdup(cand);
-				}
+				if (slash) { *slash = '\0'; if ((found = hakoTryDir(real))) return found; }
 			}
 		}
 	}
@@ -7822,28 +7832,23 @@ static char *hakoFindBinary(void) {
 		if (n > 0) {
 			buf[n] = '\0';
 			char *slash = strrchr(buf, '/');
-			if (slash) {
-				*slash = '\0';
-				char cand[PATH_MAX];
-				snprintf(cand, sizeof(cand), "%s/hako", buf);
-				if (access(cand, X_OK) == 0) return strdup(cand);
-			}
+			if (slash) { *slash = '\0'; if ((found = hakoTryDir(buf))) return found; }
 		}
 	}
 #endif
 
-	/* 2. cwd/hako (dev convenience). */
-	if (access("./hako", X_OK) == 0) return strdup("./hako");
+	/* 2. cwd (dev convenience). */
+	if ((found = hakoTryDir("."))) return found;
 
-	/* 3. ~/.local/bin/hako */
+	/* 3. ~/.local/bin */
 	const char *home = getenv("HOME");
 	if (home) {
-		snprintf(buf, sizeof(buf), "%s/.local/bin/hako", home);
-		if (access(buf, X_OK) == 0) return strdup(buf);
+		snprintf(buf, sizeof(buf), "%s/.local/bin", home);
+		if ((found = hakoTryDir(buf))) return found;
 	}
 
-	/* 4. /usr/local/bin/hako */
-	if (access("/usr/local/bin/hako", X_OK) == 0) return strdup("/usr/local/bin/hako");
+	/* 4. /usr/local/bin */
+	if ((found = hakoTryDir("/usr/local/bin"))) return found;
 
 	/* 5. PATH lookup (execvp will search). */
 	return strdup("hako");
