@@ -12,6 +12,14 @@ backup/
 # build
 build/
 hako
+# editor build outputs (source is hake.c / hake.rc — keep those)
+/hake
+hake.exe
+hake.res
+hake_asan
+*.dSYM/
+*.o
+*.obj
 
 # macOS
 .DS_Store

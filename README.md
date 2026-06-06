@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.3-b89656?style=flat-square&labelColor=14130f" alt="v0.1.3"/></a>
+  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.4-b89656?style=flat-square&labelColor=14130f" alt="v0.1.4"/></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-c8c2b2?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/C99-single%20file-c8c2b2?style=flat-square&labelColor=14130f" alt="C99 single file"/>
   <img src="https://img.shields.io/badge/themes-17-c8c2b2?style=flat-square&labelColor=14130f" alt="17 themes"/>
@@ -35,7 +35,7 @@
       <sub><b>紙 Kami</b>: file explorer</sub>
     </td>
     <td align="center" width="50%">
-      <!-- SCREENSHOT: screenshot-rei.png — Rei pane open with a hako-sho-stock conversation visible. Banner should say `hako 0.1.6 · mithraeum · hako-sho-stock`. NEEDS UPDATE — old version showed claw branding. -->
+      <!-- SCREENSHOT: screenshot-rei.png — Rei pane open with a hako-sho conversation visible. Banner should say `hako 0.1.8 · mithraeum · hako-sho`. NEEDS UPDATE — old version showed claw branding. -->
       <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-rei.png?raw=true" alt="Split panes with Rei" width="100%"/><br/>
       <sub>Split panes + <b>零 Rei</b> AI (powered by hako-code)</sub>
     </td>
@@ -72,7 +72,7 @@
 - **Full Motion Set**: counts, named registers, text objects (`diw`, `ci"`, `da(`), marks, jumplist, dot-repeat, `:s/` substitution, bracket match
 - **Multi-Pane Support**: Split horizontally and vertically, resize with `Ctrl-W +/-/</>`
 - **File Explorer**: 紙 Kami - directory navigation, hidden-file toggle, dirs-first sort
-- **AI Assistant**: 零 Rei - powered by [hako-code](https://github.com/mithraeums/hako-code) in a split pane. Local hako models (sho-stock / koi-mini-stock) or any of its 13 cloud providers, function-calling tool loop, SSE streaming, per-project trust and history
+- **AI Assistant**: 零 Rei - powered by [hako-code](https://github.com/mithraeums/hako-code) in a split pane. Local hako models (`hako-sho` 3B / `hako-koi` 7B) or any of its 13 cloud providers, function-calling tool loop, SSE streaming, per-project trust and history
 - **Skills**: drop `~/.hako/skills/*.md` into the system prompt, install from any URL with `/skill install`
 - **Syntax Highlighting**: 40+ languages, search-match highlighting persists across edits
 - **Undo/Redo**: time-bounded undo blocks, configurable depth
@@ -307,7 +307,15 @@ hake provides syntax color for 40+ languages, some of which include:
 
 ## Change Log
 
-### v0.1.3 (Latest)<br>
+### v0.1.4 (Latest)<br>
+Suite alignment — the embedded agent + local-model story now matches hako-code v0.1.8 (`hakm` subprocess) and the flattened hako engine repo.
+
+- **Bundled agent is found again.** `hakoFindBinary` now also looks for `hako-bundled` (the `BUNDLE_HAKO=1` install name) at each location — exe dir, cwd, `~/.local/bin`, `/usr/local/bin` — preferring a standalone `hako` when present. A bundle-only install was previously invisible to the editor (finder only sought `hako`).
+- **Local models in the Rei pane.** The embedded agent runs as a `--pipe` subprocess and is the *same* `hako` you'd run in a terminal — so `:pull hako-sho` / `:model` / the `hakm` engine all work identically inside the editor. No ollama, no in-process engine link.
+- **Sharper "agent not found" guidance** — points at `hako.sh`, the bundled rebuild, and the `:pull hako-sho` next step.
+- **License hygiene** — removed the duplicate `LICENSE.txt` (GPL-3.0 lives in `LICENSE`).
+
+### v0.1.3<br>
 Editor renamed to **hake** (binary) / **hako-edit** (repo). Aligns with the v0.1.6 hako-code + hako-models suite.
 
 - **CLI rename: `hako` → `hake`.** Source file `hako.c` → `hake.c`; macros `HAKO_*` → `HAKE_*`; status bar reads `HAKE v0.1.3`; help text + `--version` updated. Splash now shows `EDIT` under the block-letter logo.
