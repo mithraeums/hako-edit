@@ -51,3 +51,6 @@ venv.bak/
 
 # macOS quarantine
 **/._*
+
+# vhs recordings — internal tooling, not shipped (outputs live in the website repo)
+vhs/

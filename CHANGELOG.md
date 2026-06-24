@@ -3,6 +3,90 @@
 All notable changes to hako-edit (binary: `hake`). Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows semver (`v0.x.y` is pre-1.0; expect breaking changes between minor versions).
 
+## [v0.1.5] — 2026-06-21
+
+Theme: **futureproof the agent wire + make a no-agent build first-class.** The editor
+talks to `hako --pipe` over JSONL; this release hardens that seam so agent updates land
+without an editor change, and makes "I don't have the agent yet" a smooth path instead
+of a dead pane. Full wire spec now lives in `.claude/hako-edit/PROTOCOL.md`.
+
+### Added — agent integration (protocol 2)
+- **In-pane tool-permission prompts.** When the agent asks to write a file or run a
+  command, the Rei pane now shows `● write_file  foo.c` with `[y] once / [n] no /
+  [a] always` and sends the answer back (`permission_request` → `permission_response`).
+  Previously a `--pipe` agent could not prompt at a non-tty, so every tool call was
+  silently denied — the pane looked broken. The editor side ships now; it lights up the
+  moment the agent advertises `protocol >= 2`.
+- **`:auto` / `:noauto`** in the Rei pane — skip (or restore) per-tool prompts for the
+  session. Rides the agent's existing `:auto on|off`, so it works against today's agent
+  too.
+- **`:install-agent`** — install the agent from inside the editor when none is found, then
+  reconnect in place. No leaving the editor to run a curl line.
+- **`:update-agent`** — self-update the running agent (`hako --update`, falling back to
+  the installer) and relaunch the child so the new binary takes effect immediately.
+- **Agent version shown.** The pane prints `agent: hako v0.2.0 (protocol N)` from the
+  handshake, or a clear "protocol 1 — tool writes need :auto" notice on an older agent.
+- **`make NO_AGENT=1`** — build an editor with no agent path at all. The Rei pane says
+  "This build ships without an agent" and never errors; editing is fully intact.
+
+### Added — interface
+- **Scrollable popup menus.** `:help` and a bare `:theme` / `:colorscheme` open a centered,
+  scrollable popup instead of a one-line status-bar dump. Navigate with `j/k`, arrows,
+  `gg`/`G`, `Ctrl-D`/`Ctrl-F`/`Ctrl-U`/`Ctrl-B`, or the mouse wheel; `esc`/`q` closes.
+- **Theme picker with live preview.** `:theme` (no argument) lists all 17 themes; the
+  highlighted theme applies live as you move, `enter` keeps it, `esc` restores the one you
+  opened with. `:theme <name>` still applies directly.
+- **Mouse in popups.** Click a row to select (and preview), click it again to apply, click
+  outside the box to dismiss.
+- **`:registers` / `:reg` popup.** Lists every set register with its byte count and a
+  content snippet, scrollable, instead of a truncated status line.
+
+### Changed — theme
+- **`mithraeum` theme realigned to the brand palette** (`mithraeums.github.io`):
+  void/bone/ash/rust/phosphor/gold/paper/chalk. Comments are warm ash (were a stray
+  sage-green that gave the whole theme a greenish cast); only strings carry the intended
+  olive-green. Gold `#b89656` is now the primary UI accent — pane borders, the splash logo,
+  popup frames, line-number column, functions/types, and the status bar all wear it.
+- **`:config` writes one unified, merge-aware `~/.hakorc`.** Regenerating now *reads* the
+  existing file and **preserves every key** — including the agent's `ai_*` and any keys
+  other tools wrote — then lays them out in Shared / Editor / Agent / Models sections. New
+  configs default `theme=mithraeum`. One file the editor, agent, and models can all share.
+
+### Changed — graceful when the agent is missing
+- **"No agent" is now distinct from "launch failed."** `hakoFindBinary` walks `$PATH`
+  itself and returns *nothing* when no agent is installed, so the pane offers
+  `:install-agent` instead of the old generic "not connected." A real launch error still
+  reports separately.
+- **Auto-respawn.** If the agent process died mid-session, the next prompt silently
+  relaunches it instead of stranding the pane until you close and reopen it.
+
+### Fixed
+- **Closing the AI (Rei) pane no longer crashes or freezes the editor.** `Ctrl-C` in the
+  agent pane (and any `:ai`/`:q rei` toggle-off) tore the pane down in the wrong order:
+  it destroyed the pane's mutex and freed its `aiData` *before* stopping the agent's
+  background reader thread — which was still reading subprocess output into that same
+  struct. Result: a heap-use-after-free (crash) or a destroyed-mutex deadlock (freeze).
+  The reader is now joinable; `hakoShutdown` reaps the child, **joins the reader**, then
+  closes the pipe, and the teardown runs *before* the free. Confirmed under ASan (the old
+  order faults in `hakoReaderThread`; the new one is clean across repeated open/close).
+- **Search no longer reads out of bounds at end of line.** `editorFindNext` advanced past a
+  match with `render + rx + 1`; when the cursor sat at the end of a line (`rx == rsize`) that
+  pointed one byte past the rendered row, so `strstr` walked off the buffer (ASan
+  heap-buffer-overflow, surfaced via `$` + `/pat` + `n`/`N`). Now guarded.
+- **Search highlight now clears on `Esc`.** It cleared the match marks then immediately
+  re-applied them from the still-set query — so the highlight never went away. The query is
+  now dropped before the rows are re-highlighted.
+- `hakoLaunch` reported success even when `execvp` failed (the child `_exit(127)` was
+  invisible to the parent) — masking a missing agent as a connected-but-dead pane.
+- Two `-Wall -Wextra` warnings (`paste_len` sign-compare; unused `button` param).
+
+### Internal
+- One verified kanji across the suite: every glyph in `hake.c` is now 箱 (hako). The
+  unverifiable Kami / Rei panel + config glyphs were replaced with 箱.
+- New `.claude/hako-edit/PROTOCOL.md` is the canonical editor⇄agent contract; the
+  remaining half (emit `permission_request`, add `version`/`protocol` to `init`) is a
+  tracked TODO on the hako-code side.
+
 ## [v0.1.4] — 2026-06-05
 
 ### Fixed — bundled agent discovery

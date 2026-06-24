@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 				
 /*** includes ***/
-#define HAKE_VERSION "0.1.4"
+#define HAKE_VERSION "0.1.5"
 
 #include <ctype.h>
 #include <errno.h>
@@ -365,6 +365,16 @@ typedef struct aiData {
 	int last_out_tokens;
 	long total_in_tokens;
 	long total_out_tokens;
+	/* pending tool-permission request (protocol 2 — see PROTOCOL.md). When
+	   perm_pending, the pane intercepts y/n/a and replies permission_response. */
+	int perm_pending;
+	int perm_id;
+	char perm_tool[64];
+	char perm_kind[16];
+	char perm_subject[1024];
+	/* launch outcome, so :install-agent / the pane footer know the real state.
+	   0 = connected, -2 = no agent on system, -3 = built without agent. */
+	int launch_status;
 } aiData;
 
 typedef struct editorPane {
@@ -499,6 +509,17 @@ struct editorConfig {
 	int splash_dismissed;
 	int full_redraw_pending;
 
+	int popup_active;
+	char **popup_lines;
+	int popup_count;
+	int popup_scroll;
+	int popup_sel;
+	int popup_selectable;
+	int popup_preview;
+	char popup_title[48];
+	char popup_saved_theme[32];
+	char theme_name[32];
+
 	Cell *grid_front;
 	Cell *grid_back;
 	int grid_w, grid_h;
@@ -535,6 +556,9 @@ struct editorConfig {
 	char *hako_session_id;
 	int hako_session_turns;
 	int hako_session_resumed;
+	char *hako_agent_version;  /* init.version — agent binary version, display only */
+	int hako_protocol;         /* init.protocol — wire version; absent ⇒ 1 (see PROTOCOL.md) */
+	int hako_auto_approve;     /* :auto/:noauto — editor-side mirror of agent auto-approve */
 
 	int auto_indent;
 	int smart_indent;
@@ -612,6 +636,13 @@ void editorDrawRows(struct abuf *ab);
 void editorDrawStatusBar(struct abuf *ab);
 void editorDrawMessageBar(struct abuf *ab);
 void editorDrawSplash(void);
+void editorDrawPopup(void);
+void editorPopupOpen(const char *title, const char *const *items, int count,
+                     int selectable, int preview);
+void editorPopupOpenHelp(void);
+void editorPopupOpenThemes(void);
+void editorPopupClose(int apply);
+void editorPopupHandleKey(int c);
 void editorProcessKeyPress(void);
 int editorInputPending(void);
 void editorLoadConfig(void);
@@ -638,6 +669,7 @@ static char *hakoFindBinary(void);
 static int hakoLaunch(aiData *data);
 static void hakoShutdown(void);
 static void hakoSendLine(const char *json);
+static void hakoInstallOrUpdate(aiData *data, int update);  /* :install-agent / :update-agent */
 static void hakoHandleEvent(aiData *data, const char *line);
 static void *hakoReaderThread(void *arg);
 void aiWorkerSend(aiData *data);
@@ -2132,6 +2164,7 @@ void editorFreePane(editorPane *pane) {
 	}
 
 	if (pane->type == PANE_AI && pane->ai) {
+		hakoShutdown();
 		pthread_mutex_destroy(&pane->ai->lock);
 		for (int i = 0; i < pane->ai->history_count; i++) {
 			free(pane->ai->history[i]);
@@ -2143,7 +2176,6 @@ void editorFreePane(editorPane *pane) {
 		free(pane->ai->prompt_buffer);
 		free(pane->ai->stream_acc);
 		free(pane->ai);
-		hakoShutdown();
 	}
 
 	free(pane);
@@ -3533,6 +3565,7 @@ void editorFindNext() {
 		if (row_idx == current_row && i == 0) {
 			int rx = editorRowCxToRx(row, current_col);
 			if (match - row->render <= rx) {
+				if (rx + 1 > row->rsize) continue;
 				match = strstr(row->render + rx + 1, E.search.query);
 				if (!match) continue;
 			}
@@ -4095,7 +4128,7 @@ int editorReadKey() {
 									}
 								}
 								
-								if (paste_len < sizeof(paste_buffer) - 1) {
+								if ((size_t)paste_len < sizeof(paste_buffer) - 1) {
 									paste_buffer[paste_len++] = c;
 								}
 							}
@@ -4199,6 +4232,7 @@ static editorPane *editorPaneAtCoord(int x, int y) {
 }
 
 void editorProcessMouse(int button, int x, int y) {
+	(void)button;  /* button state not used; routing is by coordinate */
 	editorPane *pane = editorPaneAtCoord(x, y);
 	if (pane) {
 		E.active_pane = pane;
@@ -4469,7 +4503,7 @@ void editorColonCommand() {
 			exit(0);
 		}
 	} else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "h") == 0) {
-		editorSetStatusMessage("Commands: :w :q :q! :wq :e <file> :split :vsplit :explorer :ai :config :<num> | Keys: i v V / u ^R dd yy p P gg G ^F ^B 0 $ w b J r ^W");
+		editorPopupOpenHelp();
 	} else if (strcmp(cmd, "split") == 0 || strcmp(cmd, "sp") == 0) {
 		editorSplitPane(0);
 	} else if (strcmp(cmd, "vsplit") == 0 || strcmp(cmd, "vs") == 0) {
@@ -4480,6 +4514,8 @@ void editorColonCommand() {
 		editorToggleAI();
 	} else if (strcmp(cmd, "config") == 0 || strcmp(cmd, "genconfig") == 0) {
 		editorGenerateConfig();
+	} else if (strcmp(cmd, "theme") == 0 || strcmp(cmd, "colorscheme") == 0) {
+		editorPopupOpenThemes();
 	} else if (strncmp(cmd, "theme ", 6) == 0 || strncmp(cmd, "colorscheme ", 12) == 0) {
 		const char *name = strchr(cmd, ' ');
 		if (name) {
@@ -4599,19 +4635,27 @@ void editorColonCommand() {
 		}
 		editorSetStatusMessage("%d substitution%s", total_subs, total_subs == 1 ? "" : "s");
 	} else if (strcmp(cmd, "reg") == 0 || strcmp(cmd, "registers") == 0) {
-		char out[512] = "reg: ";
-		int off = 5;
-		for (int i = 0; i < 26; i++) {
-			if (E.hk.registers[i].data && E.hk.registers[i].len > 0) {
-				int n = snprintf(out + off, sizeof(out) - off, "\"%c=%d ", 'a' + i, E.hk.registers[i].len);
-				if (n < 0 || n >= (int)(sizeof(out) - off)) break;
-				off += n;
+		char *items[27]; int n = 0;
+		char buf[160];
+		for (int i = 0; i < 27; i++) {
+			pasteBuffer *rg = &E.hk.registers[i];
+			if (!rg->data || rg->len <= 0) continue;
+			char name = (i < 26) ? ('a' + i) : '"';
+			char snip[64]; int s = 0;
+			for (int j = 0; j < rg->len && s < (int)sizeof(snip) - 1; j++) {
+				char ch = rg->data[j];
+				snip[s++] = (ch == '\n' || ch == '\t') ? ' ' : ch;
 			}
+			snip[s] = '\0';
+			snprintf(buf, sizeof(buf), "\"%c  %5d  %s", name, rg->len, snip);
+			items[n++] = strdup(buf);
 		}
-		if (E.hk.registers[26].data && E.hk.registers[26].len > 0) {
-			snprintf(out + off, sizeof(out) - off, "\"\"=%d ", E.hk.registers[26].len);
+		if (n == 0) {
+			editorSetStatusMessage("No registers set");
+		} else {
+			editorPopupOpen("Registers", (const char *const *)items, n, 0, 0);
+			for (int i = 0; i < n; i++) free(items[i]);
 		}
-		editorSetStatusMessage("%s", out);
 	} else {
 		editorSetStatusMessage("Unknown command: %s", cmd);
 	}
@@ -4784,6 +4828,7 @@ void editorRefreshScreen() {
 	editorDrawRows(&ab);
 	editorDrawStatusBar(&ab);
 	editorDrawMessageBar(&ab);
+	if (E.popup_active) editorDrawPopup();
 	gridFlush(&ab);
 
 	editorPane *pane = E.active_pane;
@@ -4888,7 +4933,7 @@ void editorRefreshScreen() {
 		abAppend(&ab, buf, strlen(buf));
 	}
 
-	abAppend(&ab, "\x1b[?25h", 6);
+	if (!E.popup_active) abAppend(&ab, "\x1b[?25h", 6);
 
 	write(STDOUT_FILENO, ab.b, ab.len);
 	abFree(&ab);
@@ -5171,6 +5216,11 @@ void editorProcessKeyPress() {
 		E.splash_active = 0;
 		E.splash_dismissed = 1;
 		editorSetStatusMessage(":h = help | :w = write | :q = quit | / = find | ^W = window | :rei/:ai = agent");
+		return;
+	}
+
+	if (E.popup_active) {
+		editorPopupHandleKey(c);
 		return;
 	}
 
@@ -5895,6 +5945,8 @@ void editorProcessKeyPress() {
 
 		case '\x1b':
 			if (E.search.query) {
+				free(E.search.query);
+				E.search.query = NULL;
 				for (int i = 0; i < pane->numrows; i++) {
 					erow *row = &pane->row[i];
 					for (int j = 0; j < row->rsize; j++) {
@@ -6258,6 +6310,269 @@ void editorProcessKeyPress() {
 			editorSetMode(MODE_NORMAL);
 			break;
 		}
+	}
+}
+
+/*** scrollable popup overlay ***/
+
+static const char *const HK_THEME_NAMES[] = {
+	"mithraeum", "dark", "light", "gruvbox", "nord", "dracula", "monokai",
+	"solarized", "tokyonight", "catppuccin", "onedark", "material",
+	"everforest", "rosepine", "ayu", "kanagawa"
+};
+#define HK_THEME_COUNT ((int)(sizeof(HK_THEME_NAMES)/sizeof(HK_THEME_NAMES[0])))
+
+void editorPopupFree(void) {
+	if (E.popup_lines) {
+		for (int i = 0; i < E.popup_count; i++) free(E.popup_lines[i]);
+		free(E.popup_lines);
+		E.popup_lines = NULL;
+	}
+	E.popup_count = 0;
+}
+
+void editorPopupOpen(const char *title, const char *const *items, int count,
+                     int selectable, int preview) {
+	editorPopupFree();
+	if (count < 0) count = 0;
+	E.popup_lines = count ? calloc(count, sizeof(char *)) : NULL;
+	if (count && !E.popup_lines) return;
+	for (int i = 0; i < count; i++) {
+		E.popup_lines[i] = strdup(items[i] ? items[i] : "");
+		if (!E.popup_lines[i]) { E.popup_count = i; editorPopupFree(); return; }
+	}
+	E.popup_count = count;
+	E.popup_scroll = 0;
+	E.popup_sel = 0;
+	E.popup_selectable = selectable;
+	E.popup_preview = preview;
+	snprintf(E.popup_title, sizeof(E.popup_title), "%s", title ? title : "");
+	snprintf(E.popup_saved_theme, sizeof(E.popup_saved_theme), "%s", E.theme_name);
+	E.popup_active = 1;
+	E.full_redraw_pending = 1;
+}
+
+void editorPopupOpenHelp(void) {
+	char *txt = strdup(HAKE_HELP_TEXT);
+	if (!txt) return;
+	int cap = 64, n = 0;
+	char **lines = malloc(cap * sizeof(char *));
+	if (!lines) { free(txt); return; }
+	char *p = txt;
+	while (1) {
+		char *nl = strchr(p, '\n');
+		if (nl) *nl = '\0';
+		if (n >= cap) { cap *= 2; char **nb = realloc(lines, cap * sizeof(char *));
+			if (!nb) break; lines = nb; }
+		lines[n++] = p;
+		if (!nl) break;
+		p = nl + 1;
+	}
+	editorPopupOpen("Help — commands & keys", (const char *const *)lines, n, 0, 0);
+	free(lines);
+	free(txt);
+}
+
+void editorPopupOpenThemes(void) {
+	editorPopupOpen("Theme", HK_THEME_NAMES, HK_THEME_COUNT, 1, 1);
+	for (int i = 0; i < HK_THEME_COUNT; i++) {
+		if (strcmp(HK_THEME_NAMES[i], E.theme_name) == 0) { E.popup_sel = i; break; }
+	}
+}
+
+void editorPopupClose(int apply) {
+	if (!E.popup_active) return;
+	if (E.popup_preview && !apply) {
+		if (E.popup_saved_theme[0] &&
+		    strcmp(E.popup_saved_theme, E.theme_name) != 0) {
+			editorApplyThemeByName(E.popup_saved_theme);
+		}
+	} else if (apply && E.popup_selectable && E.popup_count > 0) {
+		const char *sel = E.popup_lines[E.popup_sel];
+		if (E.popup_preview) {
+			editorSetStatusMessage("theme: %s", sel);
+		}
+	}
+	E.popup_active = 0;
+	editorPopupFree();
+	E.full_redraw_pending = 1;
+}
+
+static int hkPopupBodyRows(void) {
+	int rows = E.screenrows - 8;
+	if (rows > E.popup_count) rows = E.popup_count;
+	if (rows < 1) rows = 1;
+	if (rows > 24) rows = 24;
+	return rows;
+}
+
+static void hkPopupGeom(int *x0, int *y0, int *boxw, int *boxh, int *inner, int *body) {
+	int b = hkPopupBodyRows();
+	int maxw = (int)strlen(E.popup_title);
+	for (int i = 0; i < E.popup_count; i++) {
+		int l = (int)strlen(E.popup_lines[i]);
+		if (l > maxw) maxw = l;
+	}
+	int in = maxw + 2;
+	int max_in = E.screencols - 4;
+	if (in > max_in) in = max_in;
+	if (in < 12) in = 12;
+	int bw = in + 2, bh = b + 4;
+	int X = (E.screencols - bw) / 2; if (X < 0) X = 0;
+	int Y = (E.screenrows - bh) / 2; if (Y < 1) Y = 1;
+	*x0 = X; *y0 = Y; *boxw = bw; *boxh = bh; *inner = in; *body = b;
+}
+
+static void hkPopupClampScroll(void) {
+	int body = hkPopupBodyRows();
+	if (E.popup_selectable) {
+		if (E.popup_sel < 0) E.popup_sel = 0;
+		if (E.popup_sel >= E.popup_count) E.popup_sel = E.popup_count - 1;
+		if (E.popup_sel < E.popup_scroll) E.popup_scroll = E.popup_sel;
+		if (E.popup_sel >= E.popup_scroll + body) E.popup_scroll = E.popup_sel - body + 1;
+	}
+	int max_scroll = E.popup_count - body;
+	if (max_scroll < 0) max_scroll = 0;
+	if (E.popup_scroll > max_scroll) E.popup_scroll = max_scroll;
+	if (E.popup_scroll < 0) E.popup_scroll = 0;
+}
+
+void editorPopupHandleKey(int c) {
+	static int g_pending = 0;
+	int body = hkPopupBodyRows();
+
+	if (c == MOUSE_MOTION || c == 0) return;
+
+	if (c == MOUSE_CLICK) {
+		int x0, y0, boxw, boxh, inner, gbody;
+		hkPopupGeom(&x0, &y0, &boxw, &boxh, &inner, &gbody);
+		int mx = E.mouse_x, my = E.mouse_y;
+		if (mx < x0 || mx >= x0 + boxw || my < y0 || my >= y0 + boxh) {
+			editorPopupClose(0);
+			return;
+		}
+		int r = my - (y0 + 3);
+		if (r >= 0 && r < gbody && E.popup_selectable) {
+			int idx = E.popup_scroll + r;
+			if (idx >= 0 && idx < E.popup_count) {
+				if (idx == E.popup_sel) { editorPopupClose(1); return; }
+				E.popup_sel = idx;
+				hkPopupClampScroll();
+				if (E.popup_preview && strcmp(E.popup_lines[E.popup_sel], E.theme_name) != 0)
+					editorApplyThemeByName(E.popup_lines[E.popup_sel]);
+				E.full_redraw_pending = 1;
+			}
+		}
+		return;
+	}
+
+	if (c == 'g') {
+		if (g_pending) { g_pending = 0;
+			if (E.popup_selectable) E.popup_sel = 0; else E.popup_scroll = 0; }
+		else g_pending = 1;
+	} else {
+		g_pending = 0;
+		switch (c) {
+		case '\x1b':
+		case 'q':
+			editorPopupClose(0);
+			return;
+		case '\r':
+		case '\n':
+			editorPopupClose(1);
+			return;
+		case 'j':
+		case ARROW_DOWN:
+		case MOUSE_WHEEL_DOWN:
+			if (E.popup_selectable) E.popup_sel++; else E.popup_scroll++;
+			break;
+		case 'k':
+		case ARROW_UP:
+		case MOUSE_WHEEL_UP:
+			if (E.popup_selectable) E.popup_sel--; else E.popup_scroll--;
+			break;
+		case CTRL_KEY('d'):
+		case CTRL_KEY('f'):
+		case PAGE_DOWN:
+			if (E.popup_selectable) E.popup_sel += body; else E.popup_scroll += body;
+			break;
+		case CTRL_KEY('u'):
+		case CTRL_KEY('b'):
+		case PAGE_UP:
+			if (E.popup_selectable) E.popup_sel -= body; else E.popup_scroll -= body;
+			break;
+		case 'G':
+			if (E.popup_selectable) E.popup_sel = E.popup_count - 1;
+			else E.popup_scroll = E.popup_count;
+			break;
+		default:
+			break;
+		}
+	}
+
+	hkPopupClampScroll();
+	if (E.popup_preview && E.popup_selectable && E.popup_count > 0) {
+		if (strcmp(E.popup_lines[E.popup_sel], E.theme_name) != 0)
+			editorApplyThemeByName(E.popup_lines[E.popup_sel]);
+	}
+	E.full_redraw_pending = 1;
+}
+
+void editorDrawPopup() {
+	if (!E.popup_active || E.popup_count <= 0) return;
+	hkPopupClampScroll();
+
+	int x0, y0, boxw, boxh, inner, body;
+	hkPopupGeom(&x0, &y0, &boxw, &boxh, &inner, &body);
+
+	Color bd = E.theme.border, bg = E.theme.status_bg, fg = E.theme.fg;
+	Color tfg = E.theme.status_fg, dim = E.theme.line_number;
+	Color sel_fg = E.theme.visual_fg, sel_bg = E.theme.visual_bg;
+
+	char line[512];
+	gridPutStr(x0, y0, "\xe2\x95\xad", 1, bd, bg);
+	for (int x = 1; x < boxw - 1; x++) gridPutStr(x0 + x, y0, "\xe2\x94\x80", 1, bd, bg);
+	gridPutStr(x0 + boxw - 1, y0, "\xe2\x95\xae", 1, bd, bg);
+
+	gridPutStr(x0, y0 + 1, "\xe2\x94\x82", 1, bd, bg);
+	for (int x = 1; x < boxw - 1; x++) gridPutCh(x0 + x, y0 + 1, ' ', tfg, bg);
+	snprintf(line, sizeof(line), " %s", E.popup_title);
+	gridPutStr(x0 + 1, y0 + 1, line, inner, tfg, bg);
+	gridPutStr(x0 + boxw - 1, y0 + 1, "\xe2\x94\x82", 1, bd, bg);
+
+	gridPutStr(x0, y0 + 2, "\xe2\x94\x9c", 1, bd, bg);
+	for (int x = 1; x < boxw - 1; x++) gridPutStr(x0 + x, y0 + 2, "\xe2\x94\x80", 1, bd, bg);
+	gridPutStr(x0 + boxw - 1, y0 + 2, "\xe2\x94\xa4", 1, bd, bg);
+
+	for (int r = 0; r < body; r++) {
+		int gy = y0 + 3 + r;
+		int idx = E.popup_scroll + r;
+		gridPutStr(x0, gy, "\xe2\x94\x82", 1, bd, bg);
+		gridPutStr(x0 + boxw - 1, gy, "\xe2\x94\x82", 1, bd, bg);
+		int selected = (E.popup_selectable && idx == E.popup_sel);
+		Color rfg = selected ? sel_fg : fg;
+		Color rbg = selected ? sel_bg : bg;
+		for (int x = 1; x < boxw - 1; x++) gridPutCh(x0 + x, gy, ' ', rfg, rbg);
+		if (idx < E.popup_count) {
+			const char *prefix = selected ? "\xe2\x96\xb8 " : "  ";
+			snprintf(line, sizeof(line), "%s%s",
+			         E.popup_selectable ? prefix : "", E.popup_lines[idx]);
+			gridPutStr(x0 + 1, gy, line, inner, rfg, rbg);
+		}
+	}
+
+	gridPutStr(x0, y0 + boxh - 1, "\xe2\x95\xb0", 1, bd, bg);
+	for (int x = 1; x < boxw - 1; x++) gridPutStr(x0 + x, y0 + boxh - 1, "\xe2\x94\x80", 1, bd, bg);
+	gridPutStr(x0 + boxw - 1, y0 + boxh - 1, "\xe2\x95\xaf", 1, bd, bg);
+	const char *hint = E.popup_selectable ? " j/k move  enter apply  esc cancel "
+	                                       : " j/k scroll  esc close ";
+	int hlen = (int)strlen(hint);
+	if (hlen < boxw - 2) gridPutStr(x0 + boxw - 1 - hlen, y0 + boxh - 1, hint, hlen, dim, bg);
+	if (E.popup_count > body) {
+		char pos[24];
+		snprintf(pos, sizeof(pos), " %d/%d ",
+		         (E.popup_selectable ? E.popup_sel : E.popup_scroll) + 1, E.popup_count);
+		gridPutStr(x0 + 2, y0 + boxh - 1, pos, (int)strlen(pos), dim, bg);
 	}
 }
 
@@ -6833,11 +7148,16 @@ void editorInitAI() {
 	E.hako_session_id = NULL;
 	E.hako_session_turns = 0;
 	E.hako_session_resumed = 0;
+	E.hako_agent_version = NULL;
+	E.hako_protocol = 1;
+	E.hako_auto_approve = 0;
 }
 
 void editorCleanupAI() {
 	free(E.hako_session_id);
 	E.hako_session_id = NULL;
+	free(E.hako_agent_version);
+	E.hako_agent_version = NULL;
 }
 
 void aiInit(editorPane *pane) {
@@ -6879,12 +7199,22 @@ void aiInit(editorPane *pane) {
 
 	pane->ai = data;
 
-	if (hakoLaunch(data) < 0) {
-		data->history[data->history_count++] = strdup("hako agent not found.");
-		data->history[data->history_count++] = strdup("install: curl -fsSL https://mithraeums.github.io/hako.sh | sh");
-		data->history[data->history_count++] = strdup("or rebuild bundled: make BUNDLE_HAKO=1 (from hake source).");
-		data->history[data->history_count++] = strdup("then reopen — the agent runs here; :pull hako-sho for a local model.");
-		data->history[data->history_count++] = strdup("'i' to try again | /help");
+	int rc = hakoLaunch(data);
+	data->launch_status = rc;
+	if (rc == -3) {
+		/* compiled without an agent — graceful, not an error. */
+		data->history[data->history_count++] = strdup("This build ships without an agent.");
+		data->history[data->history_count++] = strdup("Editing works fully; the Rei pane is inactive.");
+		data->history[data->history_count++] = strdup("Get the full build: https://mithraeums.github.io/hake.sh");
+	} else if (rc == -2) {
+		/* editor has the wire; no agent binary on the system yet. */
+		data->history[data->history_count++] = strdup("No hako agent found on this system.");
+		data->history[data->history_count++] = strdup(":install-agent   install it now, in place");
+		data->history[data->history_count++] = strdup("or: curl -fsSL https://mithraeums.github.io/hako.sh | sh");
+		data->history[data->history_count++] = strdup("then 'i' to retry — :pull hako-sho for a local model.");
+	} else if (rc < 0) {
+		data->history[data->history_count++] = strdup("Could not start the agent (launch error).");
+		data->history[data->history_count++] = strdup("'i' to try again | :install-agent | /help");
 	} else {
 		data->history[data->history_count++] = strdup("'i' chat | /help");
 	}
@@ -6924,6 +7254,30 @@ void aiHandleKey(editorPane *pane, int key) {
 	if (!data) return;
 
 	pthread_mutex_lock(&data->lock);
+
+	/* A pending tool-permission request owns the keyboard: y/n/a answer it,
+	   everything else is swallowed so a stray key can't leak into the prompt. */
+	if (data->perm_pending) {
+		const char *dec = NULL;
+		if      (key == 'y' || key == 'Y') dec = "y";
+		else if (key == 'a' || key == 'A') dec = "a";
+		else if (key == 'n' || key == 'N' || key == '\x1b') dec = "n";
+		if (dec) {
+			char json[96];
+			snprintf(json, sizeof(json),
+				"{\"type\":\"permission_response\",\"id\":%d,\"decision\":\"%s\"}",
+				data->perm_id, dec);
+			data->perm_pending = 0;
+			aiAddHistory(data, dec[0] == 'n' ? "  denied" :
+			                   dec[0] == 'a' ? "  allowed (always)" : "  allowed");
+			data->history_pos = MAX(0, data->history_count - 20);
+			pthread_mutex_unlock(&data->lock);
+			hakoSendLine(json);
+			return;
+		}
+		pthread_mutex_unlock(&data->lock);
+		return;
+	}
 
 	if (data->mode == MODE_INSERT) {
 		if (data->prompt_cursor < 0) data->prompt_cursor = 0;
@@ -7237,6 +7591,24 @@ void aiHandleKey(editorPane *pane, int key) {
 						data->cursor_x = data->cursor_y = 0;
 						data->history_pos = 0;
 						editorSetStatusMessage("AI history cleared");
+					} else if (strcmp(cmd, "auto") == 0) {
+						E.hako_auto_approve = 1;
+						data->perm_pending = 0;  /* a pending prompt is moot now */
+						hakoSendLine("{\"type\":\"slash\",\"cmd\":\":auto on\"}");
+						aiAddHistory(data, "auto-approve ON — tools run without prompting (:noauto to undo).");
+						data->history_pos = MAX(0, data->history_count - 20);
+					} else if (strcmp(cmd, "noauto") == 0) {
+						E.hako_auto_approve = 0;
+						hakoSendLine("{\"type\":\"slash\",\"cmd\":\":auto off\"}");
+						aiAddHistory(data, "auto-approve OFF — prompt per tool call (:auto to skip).");
+						data->history_pos = MAX(0, data->history_count - 20);
+					} else if (strcmp(cmd, "install-agent") == 0 ||
+					           strcmp(cmd, "update-agent")  == 0) {
+						int upd = (cmd[0] == 'u');
+						free(cmd);
+						pthread_mutex_unlock(&data->lock);
+						hakoInstallOrUpdate(data, upd);  /* locks internally */
+						return;
 					}
 					free(cmd);
 				}
@@ -7537,6 +7909,7 @@ static FILE *g_hako_fp_read       = NULL;
 static pid_t g_hako_pid           = -1;
 static pthread_t g_hako_reader;
 static int g_hako_reader_running  = 0;
+static int g_hako_reader_valid    = 0;
 static aiData *g_hako_data        = NULL;
 
 static char *hkExtractJsonString(const char *src, const char *key) {
@@ -7660,11 +8033,16 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 		int   turns    = hkExtractJsonInt(line, "turns");
 		char *provider = hkExtractJsonString(line, "provider");
 		char *model    = hkExtractJsonString(line, "model");
+		char *version  = hkExtractJsonString(line, "version");   /* protocol 2 */
+		int   protocol = hkExtractJsonInt(line, "protocol");     /* absent ⇒ 1 */
 
 		free(E.hako_session_id);
 		E.hako_session_id      = session ? session : strdup("");
 		E.hako_session_turns   = turns > 0 ? turns : 0;
 		E.hako_session_resumed = resumed > 0 ? 1 : 0;
+		free(E.hako_agent_version);
+		E.hako_agent_version   = version;  /* may be NULL on protocol 1 */
+		E.hako_protocol        = protocol > 0 ? protocol : 1;
 
 		pthread_mutex_lock(&data->lock);
 		char info[256];
@@ -7675,6 +8053,10 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 				(model && *model) ? model : "");
 			aiAddHistory(data, info);
 		}
+		if (version)
+			{ snprintf(info, sizeof(info), "agent: hako v%s (protocol %d)", version, E.hako_protocol); aiAddHistory(data, info); }
+		else
+			aiAddHistory(data, "agent: protocol 1 — tool writes need :auto until you upgrade hako");
 		if (E.hako_session_resumed && E.hako_session_turns > 0) {
 			snprintf(info, sizeof(info), "session: resumed (%d turns)", E.hako_session_turns);
 			aiAddHistory(data, info);
@@ -7775,6 +8157,33 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 		data->history_pos = MAX(0, data->history_count - 20);
 		pthread_mutex_unlock(&data->lock);
 		free(msg);
+
+	} else if (strcmp(type, "permission_request") == 0) {
+		/* protocol 2: agent wants approval for a tool call. Park a pending
+		   request; the pane intercepts y/n/a and replies permission_response. */
+		int   id      = hkExtractJsonInt(line, "id");
+		char *tool    = hkExtractJsonString(line, "tool");
+		char *kind    = hkExtractJsonString(line, "kind");
+		char *subject = hkExtractJsonString(line, "subject");
+		pthread_mutex_lock(&data->lock);
+		data->perm_pending = 1;
+		data->perm_id      = id;
+		snprintf(data->perm_tool,    sizeof(data->perm_tool),    "%s", tool    ? tool    : "tool");
+		snprintf(data->perm_kind,    sizeof(data->perm_kind),    "%s", kind    ? kind    : "read");
+		snprintf(data->perm_subject, sizeof(data->perm_subject), "%s", subject ? subject : "");
+		char ask[1280];
+		snprintf(ask, sizeof(ask), "\xE2\x97\x8F %s  %s", data->perm_tool,
+			*data->perm_subject ? data->perm_subject : "(no subject)");
+		aiAddHistory(data, ask);
+		const char *always =
+			strcmp(data->perm_kind, "write") == 0 ? "always write this project" :
+			strcmp(data->perm_kind, "shell") == 0 ? "always run exactly this"   :
+			                                        "always read this project";
+		snprintf(ask, sizeof(ask), "allow?  [y] once   [n] no   [a] %s", always);
+		aiAddHistory(data, ask);
+		data->history_pos = MAX(0, data->history_count - 20);
+		pthread_mutex_unlock(&data->lock);
+		free(tool); free(kind); free(subject);
 	}
 
 	free(type);
@@ -7850,16 +8259,38 @@ static char *hakoFindBinary(void) {
 	/* 4. /usr/local/bin */
 	if ((found = hakoTryDir("/usr/local/bin"))) return found;
 
-	/* 5. PATH lookup (execvp will search). */
-	return strdup("hako");
+	/* 5. Walk $PATH ourselves so we can tell "no agent installed" apart from a
+	   launch error — execvp would hide that as a child exit-127 the parent never
+	   sees. NULL here ⇒ the install offer, not a dead "not connected" pane. */
+	const char *path = getenv("PATH");
+	if (path) {
+		const char *p = path;
+		while (*p) {
+			const char *colon = strchr(p, ':');
+			int seg = colon ? (int)(colon - p) : (int)strlen(p);
+			if (seg > 0 && seg < PATH_MAX - 6) {
+				char dir[PATH_MAX];
+				memcpy(dir, p, seg);
+				dir[seg] = '\0';
+				if ((found = hakoTryDir(dir))) return found;
+			}
+			if (!colon) break;
+			p = colon + 1;
+		}
+	}
+	return NULL;  /* no agent anywhere — caller shows the install offer */
 }
 
 static int hakoLaunch(aiData *data) {
-#ifdef _WIN32
-	(void)data;
-	return -1;
+#ifdef HAKE_NO_AGENT
+	(void)data; (void)hakoReaderThread; (void)g_hako_reader;  /* keep reader chain referenced */
+	return -3;  /* compiled without an agent (make NO_AGENT=1) */
+#elif defined(_WIN32)
+	(void)data; (void)hakoReaderThread; (void)g_hako_reader;
+	return -2;  /* no pipe-agent path on Windows yet — offer install guidance */
 #else
 	char *bin = hakoFindBinary();
+	if (!bin) return -2;  /* no agent installed — caller offers :install-agent */
 	int to_child[2], from_child[2];
 	if (pipe(to_child)   < 0 ||
 	    pipe(from_child) < 0) { free(bin); return -1; }
@@ -7893,23 +8324,21 @@ static int hakoLaunch(aiData *data) {
 		g_hako_reader_running = 0;
 		return -1;
 	}
-	pthread_detach(g_hako_reader);
+	g_hako_reader_valid = 1;
 	return 0;
 #endif
 }
 
 static void hakoShutdown(void) {
 #ifndef _WIN32
+	/* Order: close write + reap child (EOFs the reader's fgets) → join reader → only
+	   then fclose. Reader touches the aiData/mutex the caller frees right after. */
 	if (g_hako_fd_write >= 0) {
 		const char *quit = "{\"type\":\"quit\"}\n";
 		ssize_t w = write(g_hako_fd_write, quit, strlen(quit));
 		(void)w;
 		close(g_hako_fd_write);
 		g_hako_fd_write = -1;
-	}
-	if (g_hako_fp_read) {
-		fclose(g_hako_fp_read);
-		g_hako_fp_read = NULL;
 	}
 	if (g_hako_pid > 0) {
 		/* graceful: hako sees quit on stdin or EOF, exits.
@@ -7925,8 +8354,76 @@ static void hakoShutdown(void) {
 		}
 		g_hako_pid = -1;
 	}
+	if (g_hako_reader_valid) {
+		pthread_join(g_hako_reader, NULL);
+		g_hako_reader_valid = 0;
+	}
+	if (g_hako_fp_read) {
+		fclose(g_hako_fp_read);
+		g_hako_fp_read = NULL;
+	}
 	g_hako_reader_running = 0;
 	g_hako_data           = NULL;
+#endif
+}
+
+/* :install-agent (update=0) / :update-agent (update=1). Install fetches the latest
+   release; update runs the resolved binary's own `--update` and falls back to the
+   installer if no binary is found. Blocks the UI for the run (explicit user action,
+   like vim's :!cmd), then relaunches the child so the new binary takes effect. */
+static void hakoInstallOrUpdate(aiData *data, int update) {
+#ifdef _WIN32
+	pthread_mutex_lock(&data->lock);
+	aiAddHistory(data, "Agent install/update is not wired on Windows yet.");
+	aiAddHistory(data, "Install manually from https://mithraeums.github.io/hako.sh");
+	pthread_mutex_unlock(&data->lock);
+	return;
+#else
+	char cmd[PATH_MAX + 32];
+	char *bin = update ? hakoFindBinary() : NULL;
+	if (update && bin) snprintf(cmd, sizeof(cmd), "%s --update 2>&1", bin);
+	else snprintf(cmd, sizeof(cmd),
+		"curl -fsSL https://mithraeums.github.io/hako.sh | sh 2>&1");
+	free(bin);
+
+	pthread_mutex_lock(&data->lock);
+	aiAddHistory(data, update ? "updating agent..." : "installing agent...");
+	data->history_pos = MAX(0, data->history_count - 20);
+	pthread_mutex_unlock(&data->lock);
+	editorRefreshScreen();
+
+	FILE *fp = popen(cmd, "r");
+	if (!fp) {
+		pthread_mutex_lock(&data->lock);
+		aiAddHistory(data, "could not start installer");
+		pthread_mutex_unlock(&data->lock);
+		return;
+	}
+	char ln[512], last[512] = "";
+	while (fgets(ln, sizeof(ln), fp)) {
+		ln[strcspn(ln, "\r\n")] = '\0';
+		if (*ln) snprintf(last, sizeof(last), "%s", ln);
+	}
+	int rc = pclose(fp);
+
+	pthread_mutex_lock(&data->lock);
+	if (*last) aiAddHistory(data, last);
+	pthread_mutex_unlock(&data->lock);
+
+	if (rc != 0) {
+		pthread_mutex_lock(&data->lock);
+		aiAddHistory(data, "install/update failed — see output above");
+		pthread_mutex_unlock(&data->lock);
+		return;
+	}
+	/* relaunch so the freshly-installed binary is the live child */
+	hakoShutdown();
+	int r = hakoLaunch(data);
+	data->launch_status = r;
+	pthread_mutex_lock(&data->lock);
+	aiAddHistory(data, r == 0 ? "agent connected." : "agent still not found after install.");
+	data->history_pos = MAX(0, data->history_count - 20);
+	pthread_mutex_unlock(&data->lock);
 #endif
 }
 
@@ -7934,10 +8431,15 @@ void aiWorkerSend(aiData *data) {
 	if (!data) return;
 	if (data->streaming) return;
 	if (g_hako_fd_write < 0) {
-		pthread_mutex_lock(&data->lock);
-		aiAddHistory(data, "Rei not connected. Close and reopen (:q rei, then :rei).");
-		pthread_mutex_unlock(&data->lock);
-		return;
+		/* agent died (or never started) — try one silent respawn before nagging. */
+		if (hakoLaunch(data) == 0) {
+			data->launch_status = 0;
+		} else {
+			pthread_mutex_lock(&data->lock);
+			aiAddHistory(data, "Agent not connected. :install-agent, or :q rei then :rei.");
+			pthread_mutex_unlock(&data->lock);
+			return;
+		}
 	}
 	data->streaming = 1;
 	char esc[8192];
@@ -7965,63 +8467,111 @@ int hkHandleSlash(aiData *data, const char *prompt) {
 	return 0;
 }
 
+static const char *hkRcVal(char **ek, char **ev, int en, const char *key, char *used) {
+	for (int i = 0; i < en; i++) {
+		if (strcmp(ek[i], key) == 0) {
+			if (used) used[i] = 1;
+			return ev[i];
+		}
+	}
+	return NULL;
+}
+
+static const char *hkRcOr(char **ek, char **ev, int en, const char *key, char *used, const char *def) {
+	const char *v = hkRcVal(ek, ev, en, key, used);
+	return v ? v : def;
+}
+
 void editorGenerateConfig(void) {
 	const char *home = getenv("HOME");
 	if (!home) { editorSetStatusMessage("Cannot find HOME directory"); return; }
 	char path[512];
 	snprintf(path, sizeof(path), "%s/.hakorc", home);
+
+	char *ek[256]; char *ev[256]; char used[256]; int en = 0;
+	memset(used, 0, sizeof(used));
+	FILE *rf = fopen(path, "r");
+	if (rf) {
+		char *ln = NULL; size_t cap = 0;
+		while (en < 256 && getline(&ln, &cap, rf) != -1) {
+			char *s = ln;
+			while (*s == ' ' || *s == '\t') s++;
+			if (*s == '#' || *s == '\n' || *s == '\r' || *s == '\0') continue;
+			char *eq = strchr(s, '=');
+			if (!eq) continue;
+			char *ke = eq;
+			while (ke > s && (ke[-1] == ' ' || ke[-1] == '\t')) ke--;
+			*ke = '\0';
+			char *v = eq + 1;
+			while (*v == ' ' || *v == '\t') v++;
+			v[strcspn(v, "\r\n")] = 0;
+			ek[en] = strdup(s); ev[en] = strdup(v); en++;
+		}
+		free(ln);
+		fclose(rf);
+	}
+
 	FILE *fp = fopen(path, "w");
 	if (!fp) { editorSetStatusMessage("Cannot create config file: %s", strerror(errno)); return; }
 
-	fprintf(fp, "# 箱 Hako Configuration\n");
-	fprintf(fp, "# Every knob is listed below. Uncomment to change.\n\n");
+	char theme[64];
+	snprintf(theme, sizeof(theme), "%s", hkRcOr(ek, ev, en, "theme", used, "mithraeum"));
+
+	fprintf(fp, "# 箱 Hako — unified config (editor · agent · models)\n");
+	fprintf(fp, "# One file, read by hake (editor), hako (agent), hakm (models).\n");
+	fprintf(fp, "# Regenerating preserves every existing key, including other tools'.\n\n");
 
 	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "#  Editor basics\n");
-	fprintf(fp, "# ============================================================\n\n");
-	fprintf(fp, "tab_stop=4\n");
-	fprintf(fp, "use_tabs=1\n");
-	fprintf(fp, "word_wrap=1\n");
-	fprintf(fp, "show_line_numbers=1\n");
-	fprintf(fp, "max_undo_levels=100\n");
-	fprintf(fp, "auto_indent=1\n");
-	fprintf(fp, "smart_indent=1\n");
-	fprintf(fp, "mouse_enabled=1\n");
-	fprintf(fp, "scroll_speed=3\n\n");
+	fprintf(fp, "#  Shared\n");
+	fprintf(fp, "# ============================================================\n");
+	fprintf(fp, "# Preset: mithraeum, dark, light, gruvbox, nord, dracula, monokai,\n");
+	fprintf(fp, "# solarized, tokyonight, catppuccin, onedark, material, everforest,\n");
+	fprintf(fp, "# rosepine, ayu, kanagawa\n");
+	fprintf(fp, "theme=%s\n\n", theme);
 
 	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "#  紙 Kami — file explorer (left panel)\n");
-	fprintf(fp, "# ============================================================\n\n");
-	fprintf(fp, "explorer_enabled=1\n");
-	fprintf(fp, "explorer_width=30\n");
-	fprintf(fp, "explorer_show_hidden=0\n\n");
+	fprintf(fp, "#  Editor (hake)\n");
+	fprintf(fp, "# ============================================================\n");
+	fprintf(fp, "tab_stop=%s\n",             hkRcOr(ek, ev, en, "tab_stop", used, "4"));
+	fprintf(fp, "use_tabs=%s\n",             hkRcOr(ek, ev, en, "use_tabs", used, "1"));
+	fprintf(fp, "word_wrap=%s\n",            hkRcOr(ek, ev, en, "word_wrap", used, "1"));
+	fprintf(fp, "show_line_numbers=%s\n",    hkRcOr(ek, ev, en, "show_line_numbers", used, "1"));
+	fprintf(fp, "max_undo_levels=%s\n",      hkRcOr(ek, ev, en, "max_undo_levels", used, "100"));
+	fprintf(fp, "auto_indent=%s\n",          hkRcOr(ek, ev, en, "auto_indent", used, "1"));
+	fprintf(fp, "smart_indent=%s\n",         hkRcOr(ek, ev, en, "smart_indent", used, "1"));
+	fprintf(fp, "mouse_enabled=%s\n",        hkRcOr(ek, ev, en, "mouse_enabled", used, "1"));
+	fprintf(fp, "scroll_speed=%s\n",         hkRcOr(ek, ev, en, "scroll_speed", used, "3"));
+	fprintf(fp, "explorer_enabled=%s\n",     hkRcOr(ek, ev, en, "explorer_enabled", used, "1"));
+	fprintf(fp, "explorer_width=%s\n",       hkRcOr(ek, ev, en, "explorer_width", used, "30"));
+	fprintf(fp, "explorer_show_hidden=%s\n", hkRcOr(ek, ev, en, "explorer_show_hidden", used, "0"));
+	fprintf(fp, "# theme_bg, theme_fg, theme_comment, ... = R,G,B  override preset colors\n\n");
 
 	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "#  零 Rei — AI assistant (right panel)\n");
-	fprintf(fp, "#  Rei is powered by hako. Configure AI in ~/.hakocrc\n");
-	fprintf(fp, "#  Run: hako --help  |  man page: https://mithraeums.github.io\n");
-	fprintf(fp, "# ============================================================\n\n");
+	fprintf(fp, "#  Agent (hako / rei) — keys hako reads from this same file\n");
+	fprintf(fp, "# ============================================================\n");
+	fprintf(fp, "# ai_provider=mithraeum   # or anthropic, openai, ollama, ...\n");
+	fprintf(fp, "# ai_model=hako-sho\n");
+	fprintf(fp, "# ai_max_tokens=2048\n");
+	fprintf(fp, "# tool_gate=1\n\n");
 
 	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "#  Theme preset\n");
+	fprintf(fp, "#  Models (hakm)\n");
 	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "# dark, gruvbox, nord, dracula, monokai, solarized,\n");
-	fprintf(fp, "# tokyonight, catppuccin, onedark, material,\n");
-	fprintf(fp, "# everforest, rosepine, github-dark, ayu, kanagawa,\n");
-	fprintf(fp, "# light, github-light\n");
-	fprintf(fp, "theme=dark\n\n");
+	fprintf(fp, "# model=hako-sho          # default local model\n\n");
 
-	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "#  Custom colors (RGB 0-255). Override preset values.\n");
-	fprintf(fp, "# ============================================================\n\n");
-	fprintf(fp, "# theme_bg=30,30,30\n");
-	fprintf(fp, "# theme_fg=212,212,212\n");
-	fprintf(fp, "# theme_comment=106,153,85\n");
-	fprintf(fp, "# theme_keyword1=86,156,214\n");
-	fprintf(fp, "# theme_status_bg=50,50,50\n\n");
+	int leftover = 0;
+	for (int i = 0; i < en; i++) if (!used[i]) leftover = 1;
+	if (leftover) {
+		fprintf(fp, "# ============================================================\n");
+		fprintf(fp, "#  Preserved (set by other tools)\n");
+		fprintf(fp, "# ============================================================\n");
+		for (int i = 0; i < en; i++) if (!used[i]) fprintf(fp, "%s=%s\n", ek[i], ev[i]);
+		fprintf(fp, "\n");
+	}
 
 	fclose(fp);
-	editorSetStatusMessage("Config created: %s", path);
+	for (int i = 0; i < en; i++) { free(ek[i]); free(ev[i]); }
+	editorSetStatusMessage("Config melded: %s (theme=%s)", path, theme);
 }
 
 /*** init ***/
@@ -8029,19 +8579,31 @@ int editorApplyThemeByName(const char *name) {
 	if (!name) return 0;
 	if (strcmp(name, "mithraeum") == 0) {
 		E.theme_preset = THEME_MITHRAEUM;
-		E.theme.bg           = (Color){15, 14, 12};
-		E.theme.fg           = (Color){232, 223, 200};
-		E.theme.comment      = (Color){122, 113, 101};
-		E.theme.keyword1     = (Color){201, 169, 97};
-		E.theme.keyword2     = (Color){138, 154, 108};
-		E.theme.string       = (Color){168, 84, 59};
-		E.theme.number       = (Color){184, 137, 90};
-		E.theme.line_number  = (Color){58, 53, 48};
-		E.theme.status_bg    = (Color){26, 24, 20};
-		E.theme.status_fg    = (Color){201, 169, 97};
-		E.theme.border       = (Color){58, 53, 48};
-		E.theme.visual_bg    = (Color){42, 37, 32};
-		E.theme.visual_fg    = (Color){232, 223, 200};
+		E.theme.bg           = (Color){10, 10, 9};
+		E.theme.fg           = (Color){200, 194, 178};
+		E.theme.comment      = (Color){74, 70, 61};
+		E.theme.keyword1     = (Color){138, 58, 31};
+		E.theme.keyword2     = (Color){138, 58, 31};
+		E.theme.string       = (Color){122, 138, 58};
+		E.theme.number       = (Color){200, 194, 178};
+		E.theme.match        = (Color){184, 150, 86};
+		E.theme.preprocessor = (Color){138, 58, 31};
+		E.theme.function     = (Color){184, 150, 86};
+		E.theme.type         = (Color){184, 150, 86};
+		E.theme.operator     = (Color){200, 194, 178};
+		E.theme.bracket      = (Color){216, 210, 194};
+		E.theme.line_number  = (Color){120, 98, 58};
+		E.theme.status_bg    = (Color){10, 10, 9};
+		E.theme.status_fg    = (Color){184, 150, 86};
+		E.theme.border       = (Color){184, 150, 86};
+		E.theme.visual_bg    = (Color){42, 39, 34};
+		E.theme.visual_fg    = (Color){232, 226, 210};
+		E.theme.constant     = (Color){184, 150, 86};
+		E.theme.builtin      = (Color){138, 58, 31};
+		E.theme.attribute    = (Color){184, 150, 86};
+		E.theme.char_literal = (Color){122, 138, 58};
+		E.theme.escape       = (Color){184, 150, 86};
+		E.theme.label        = (Color){138, 58, 31};
 	} else if (strcmp(name, "dark") == 0) {
 		E.theme_preset = THEME_DARK;
 		E.theme.bg = (Color){30, 30, 30};
@@ -8300,39 +8862,14 @@ int editorApplyThemeByName(const char *name) {
 	} else {
 		return 0;
 	}
+	snprintf(E.theme_name, sizeof(E.theme_name), "%s", name);
 	gridInvalidateFront();
 	E.full_redraw_pending = 1;
 	return 1;
 }
 
-/* Mithraeum default — void/paper/gold/rust. Matches site banners + hako-code/hake icons. */
 void initTheme() {
-	E.theme_preset = THEME_MITHRAEUM;
-	E.theme.bg           = (Color){15, 14, 12};       /* void */
-	E.theme.fg           = (Color){232, 223, 200};    /* paper */
-	E.theme.comment      = (Color){122, 113, 101};    /* dim chalk */
-	E.theme.keyword1     = (Color){201, 169, 97};     /* gold */
-	E.theme.keyword2     = (Color){138, 154, 108};    /* sage */
-	E.theme.string       = (Color){168, 84, 59};      /* rust */
-	E.theme.number       = (Color){184, 137, 90};     /* bronze */
-	E.theme.match        = (Color){228, 196, 120};    /* bright gold */
-	E.theme.preprocessor = (Color){184, 152, 90};
-	E.theme.function     = (Color){232, 223, 200};    /* paper */
-	E.theme.type         = (Color){138, 154, 108};    /* sage */
-	E.theme.operator     = (Color){232, 223, 200};
-	E.theme.bracket      = (Color){156, 133, 80};     /* dim gold */
-	E.theme.line_number  = (Color){58, 53, 48};       /* spring */
-	E.theme.status_bg    = (Color){26, 24, 20};
-	E.theme.status_fg    = (Color){201, 169, 97};     /* gold */
-	E.theme.border       = (Color){58, 53, 48};       /* spring */
-	E.theme.visual_bg    = (Color){42, 37, 32};
-	E.theme.visual_fg    = (Color){232, 223, 200};
-	E.theme.constant     = (Color){201, 169, 97};     /* gold */
-	E.theme.builtin      = (Color){138, 154, 108};    /* sage */
-	E.theme.attribute    = (Color){184, 137, 90};     /* bronze */
-	E.theme.char_literal = (Color){168, 84, 59};      /* rust */
-	E.theme.escape       = (Color){212, 181, 114};
-	E.theme.label        = (Color){168, 84, 59};
+	editorApplyThemeByName("mithraeum");
 }
 
 void editorLoadConfig() {
@@ -8407,7 +8944,6 @@ void editorLoadConfig() {
 		} else if (strcmp(key, "theme") == 0) {
 			editorApplyThemeByName(val);
 		} else if (strncmp(key, "ai_", 3) == 0) {
-			/* AI config moved to ~/.hakocrc (read by hako) */
 			(void)val;
 		} else if (strncmp(key, "theme_", 6) == 0) {
 			int r, g, b;
@@ -8476,9 +9012,10 @@ void initEditor() {
 	E.auto_indent = 1;
 	E.smart_indent = 1;
 
-	E.explorer_kanji = strdup("紙");
+	/* one verified kanji across the suite: 箱 (hako). Panels carry it + a romaji name. */
+	E.explorer_kanji = strdup("箱");
 	E.explorer_name = strdup("Kami");
-	E.ai_kanji = strdup("零");
+	E.ai_kanji = strdup("箱");
 	E.ai_name = strdup("Rei");
 
 	E.indent_guides = 0;

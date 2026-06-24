@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.4-b89656?style=flat-square&labelColor=14130f" alt="v0.1.4"/></a>
+  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.5-b89656?style=flat-square&labelColor=14130f" alt="v0.1.5"/></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-c8c2b2?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/C99-single%20file-c8c2b2?style=flat-square&labelColor=14130f" alt="C99 single file"/>
   <img src="https://img.shields.io/badge/themes-17-c8c2b2?style=flat-square&labelColor=14130f" alt="17 themes"/>
@@ -22,41 +22,36 @@
 
 <br>
 
-<!-- SCREENSHOT: screenshot-splash.png — hake splash screen with the block-letter HAKO logo, "EDIT" subtitle, "HAKE v0.1.3", 箱 kanji, and the # NEW / # TIPS columns below. Launch `hake` with no args, screenshot full terminal. NEEDS UPDATE — old version doesn't show EDIT line. -->
 <p align="center">
-  <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-splash.png?raw=true" alt="Splash" width="82%"/>
+  <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/demo.gif?raw=true" alt="hake — splash, syntax, theme picker, help popup" width="88%"/>
 </p>
 
 <table align="center">
   <tr>
     <td align="center" width="50%">
-      <!-- SCREENSHOT: screenshot-explorer.png — Kami file explorer pane open on left, editor pane right. `:explorer` or Ctrl-W k. -->
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-explorer.png?raw=true" alt="Kami explorer" width="100%"/><br/>
-      <sub><b>紙 Kami</b>: file explorer</sub>
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/explorer.png?raw=true" alt="Kami explorer" width="100%"/><br/>
+      <sub><b>箱 Kami</b>: file explorer</sub>
     </td>
     <td align="center" width="50%">
-      <!-- SCREENSHOT: screenshot-rei.png — Rei pane open with a hako-sho conversation visible. Banner should say `hako 0.1.8 · mithraeum · hako-sho`. NEEDS UPDATE — old version showed claw branding. -->
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-rei.png?raw=true" alt="Split panes with Rei" width="100%"/><br/>
-      <sub>Split panes + <b>零 Rei</b> AI (powered by hako-code)</sub>
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/rei.png?raw=true" alt="Rei AI pane" width="100%"/><br/>
+      <sub><b>箱 Rei</b> AI (powered by hako-code)</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <!-- SCREENSHOT: screenshot-split.png — multi-pane split view. -->
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-split.png?raw=true" alt="Split panes" width="100%"/><br/>
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/split.png?raw=true" alt="Split panes" width="100%"/><br/>
       <sub>Multi-pane splits · resize with <code>Ctrl-W</code></sub>
     </td>
     <td align="center" width="50%">
-      <!-- SCREENSHOT: screenshot-themes.png — `:theme` listing or side-by-side of a few presets. -->
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/screenshot-themes.png?raw=true" alt="Theme picker" width="100%"/><br/>
-      <sub>Theme picker · 17 presets</sub>
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/splash.png?raw=true" alt="Launch splash" width="100%"/><br/>
+      <sub>Launch splash · mithraeum theme</sub>
     </td>
   </tr>
 </table>
 
 <br>
 
-零 **Rei** lives inside hake; powered by <a href="https://github.com/mithraeums/hako-code">hako-code</a>:
+箱 **Rei** lives inside hake; powered by <a href="https://github.com/mithraeums/hako-code">hako-code</a>:
 ```
  ▄█████▄
 ██ ███ ██ Rei: v1.1
@@ -71,8 +66,8 @@
 - **Modal Editing**: Vim-inspired normal, insert, visual, and visual-line modes
 - **Full Motion Set**: counts, named registers, text objects (`diw`, `ci"`, `da(`), marks, jumplist, dot-repeat, `:s/` substitution, bracket match
 - **Multi-Pane Support**: Split horizontally and vertically, resize with `Ctrl-W +/-/</>`
-- **File Explorer**: 紙 Kami - directory navigation, hidden-file toggle, dirs-first sort
-- **AI Assistant**: 零 Rei - powered by [hako-code](https://github.com/mithraeums/hako-code) in a split pane. Local hako models (`hako-sho` 3B / `hako-koi` 7B) or any of its 13 cloud providers, function-calling tool loop, SSE streaming, per-project trust and history
+- **File Explorer**: 箱 Kami - directory navigation, hidden-file toggle, dirs-first sort
+- **AI Assistant**: 箱 Rei - powered by [hako-code](https://github.com/mithraeums/hako-code) in a split pane. Local hako models (`hako-sho` 3B / `hako-koi` 7B) or any of its 13 cloud providers, function-calling tool loop, SSE streaming, per-project trust and history
 - **Skills**: drop `~/.hako/skills/*.md` into the system prompt, install from any URL with `/skill install`
 - **Syntax Highlighting**: 40+ languages, search-match highlighting persists across edits
 - **Undo/Redo**: time-bounded undo blocks, configurable depth
@@ -94,6 +89,11 @@ gcc hake.c -o hake -lpthread
 
 # Or use the Makefile to also embed the executable icon where the OS allows
 make
+
+# Build flavors
+make BUNDLE_HAKO=1   # default — also builds the hako agent next to hake
+make BUNDLE_HAKO=0   # editor only; :install-agent fetches the agent later
+make NO_AGENT=1      # editor with no agent path at all (Rei pane stays inert)
 ```
 
 **Run**
@@ -209,7 +209,7 @@ Notes:
 |`Ctrl-W w`|Switch pane     |
 |`Ctrl-W c`|Close pane      |
 
-### File Explorer (紙 Kami)
+### File Explorer (箱 Kami)
 
 |Key        |Action             |
 |-----------|-------------------|
@@ -221,7 +221,7 @@ Notes:
 |`r`        |Refresh            |
 |`q,Esc`    |Close explorer     |
 
-### AI Assistant (零 Rei)
+### AI Assistant (箱 Rei)
 
 |Key        |Action                              |
 |-----------|------------------------------------|
@@ -235,7 +235,19 @@ Notes:
 |`Ctrl-C`   |Close panel                         |
 |`:q`       |Close panel                         |
 
-### Slash commands (inside prompt):
+### Pane commands (editor-owned — the `:` line, not sent to the agent)
+
+|Command           |Action                                                        |
+|------------------|--------------------------------------------------------------|
+|`:auto` / `:noauto`|Skip / restore per-tool permission prompts for the session   |
+|`:install-agent`  |Install the hako agent in place when none is found, then connect|
+|`:update-agent`   |Self-update the agent (`hako --update`) and relaunch it        |
+|`:clear`          |Wipe visible history · `:w` saves the chat to `ai_chat.txt`   |
+
+When the agent asks to write a file or run a command, the pane prompts inline —
+`● write_file  foo.c` then `[y] once  [n] no  [a] always`. `:auto` skips the prompts.
+
+### Slash commands (inside prompt — forwarded to the agent):
 
 |Command                 |Action                                       |
 |------------------------|---------------------------------------------|
@@ -307,24 +319,16 @@ hake provides syntax color for 40+ languages, some of which include:
 
 ## Change Log
 
-### v0.1.4 (Latest)<br>
-Suite alignment — the embedded agent + local-model story now matches hako-code v0.1.8 (`hakm` subprocess) and the flattened hako engine repo.
+### v0.1.5 (Latest)
+Interface polish, an on-brand theme, a unified config — plus two crash fixes.
 
-- **Bundled agent is found again.** `hakoFindBinary` now also looks for `hako-bundled` (the `BUNDLE_HAKO=1` install name) at each location — exe dir, cwd, `~/.local/bin`, `/usr/local/bin` — preferring a standalone `hako` when present. A bundle-only install was previously invisible to the editor (finder only sought `hako`).
-- **Local models in the Rei pane.** The embedded agent runs as a `--pipe` subprocess and is the *same* `hako` you'd run in a terminal — so `:pull hako-sho` / `:model` / the `hakm` engine all work identically inside the editor. No ollama, no in-process engine link.
-- **Sharper "agent not found" guidance** — points at `hako.sh`, the bundled rebuild, and the `:pull hako-sho` next step.
-- **License hygiene** — removed the duplicate `LICENSE.txt` (GPL-3.0 lives in `LICENSE`).
+- **Popup menus** — `:help`, a bare `:theme` (live-preview picker), and `:registers` open scrollable popups (mouse + keyboard).
+- **Mithraeum theme on-brand** — matches the site palette; gold `#b89656` is the primary UI accent (borders, splash, popups, status, line numbers).
+- **One unified `~/.hakorc`** — `:config` merges and preserves the agent's `ai_*` and other tools' keys; defaults `theme=mithraeum`.
+- **Agent integration** — in-pane tool-permission prompts (`[y]/[n]/[a]`), `:install-agent` / `:update-agent`, agent auto-respawn, and a no-agent build (`make NO_AGENT=1`).
+- **Crash fixes** — closing the Rei pane (`Ctrl-C`) no longer use-after-frees the agent reader thread; search no longer reads out of bounds at end of line.
 
-### v0.1.3<br>
-Editor renamed to **hake** (binary) / **hako-edit** (repo). Aligns with the v0.1.6 hako-code + hako-models suite.
-
-- **CLI rename: `hako` → `hake`.** Source file `hako.c` → `hake.c`; macros `HAKO_*` → `HAKE_*`; status bar reads `HAKE v0.1.3`; help text + `--version` updated. Splash now shows `EDIT` under the block-letter logo.
-- **Subprocess wire updated.** Internal symbols `claw*` → `hako*` (the wire is to the `hako` agent, not to the legacy `claw` name). `hakeFindBinary` searches for `hako` on `PATH` / `~/.local/bin` / `/usr/local/bin`. `BUNDLE_HAKO=1` (default) compiles `../hako-code/hako.c` alongside `hake`.
-- **Mithraeum default theme** — void / paper / gold / rust palette matches the site banners + hake / hako-code icons. Boot default; 17 other presets still available via `:theme <name>`.
-- **SIGPIPE-safe** — hako agent crashing mid-turn no longer kills the editor; `hakoSendLine` detects `EPIPE`, `hakoShutdown` reaps cleanly.
-- **Config consolidation.** Both `hake` and `hako` read `~/.hakorc` (was `~/.hakocrc` on the agent side); editor-only keys and AI keys coexist under sectioned headers.
-
-See [CHANGELOG.md](./CHANGELOG.md) for full history.
+Full history → [CHANGELOG.md](./CHANGELOG.md).
 
 <p align="center"><sub><b>—— VII ——</b></sub></p>
 

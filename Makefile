@@ -8,13 +8,22 @@
 #
 # BUNDLE_HAKO=1 (default): also build the `hako` agent binary from ../hako-code/hako.c.
 #   hake will find and spawn it at runtime for the Rei panel.
-# BUNDLE_HAKO=0: build hake only. Rei pane shows "not found" until hako installed.
+# BUNDLE_HAKO=0: build hake only. Rei pane shows install guidance (:install-agent)
+#   until a hako binary is on the system; the editor can install it in place.
+# NO_AGENT=1: build an editor with NO agent path at all. The Rei pane stays inert and
+#   says "this build ships without an agent" — it never errors. Implies BUNDLE_HAKO=0.
 
 CC          ?= gcc
 CFLAGS      ?= -O2 -Wall
 LDLIBS      ?= -lpthread
 BUNDLE_HAKO ?= 1
+NO_AGENT    ?= 0
 HAKO_SRC    ?= ../hako-code/hako.c
+
+ifeq ($(NO_AGENT),1)
+    CFLAGS      += -DHAKE_NO_AGENT
+    BUNDLE_HAKO := 0
+endif
 
 ICON_DIR = icon
 BIN      = hake
