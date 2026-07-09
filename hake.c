@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 				
 /*** includes ***/
-#define HAKE_VERSION "0.1.5"
+#define HAKE_VERSION "0.1.6"
 
 #include <ctype.h>
 #include <errno.h>
@@ -109,7 +109,6 @@ static long hk_getline(char **lineptr, size_t *n, FILE *stream) {
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define TAB_STOP 8
 #define MAX_PANES 32
-#define PLUGIN_MAX 64
 #define AI_HISTORY_MAX 1000
 #define PASTE_BUFFER_MAX 65536
 
@@ -154,7 +153,13 @@ const char *HAKE_HELP_TEXT =
 	"    gg             Jump to top\n"
 	"    G              Jump to bottom\n"
 	"    Ctrl-F         Page forward\n"
-	"    Ctrl-B         Page backward\n\n"
+	"    Ctrl-B         Page backward\n"
+	"    ]e / [e        Next / previous runner error\n\n"
+	"  Command Mode:\n"
+	"    :!<cmd>        Run shell command, output in popup\n"
+	"    :run <cmd>     Run command in the runner pane (async)\n"
+	"    :build         Run build_cmd from .hakorc (default: make)\n"
+	"    :test          Run test_cmd from .hakorc (default: make test)\n\n"
 	"  Visual Mode:\n"
 	"    y              Yank selection\n"
 	"    d,x            Delete/cut selection\n"
@@ -168,9 +173,7 @@ enum editorMode {
 	MODE_NORMAL,
 	MODE_INSERT,
 	MODE_VISUAL,
-	MODE_VISUAL_LINE,
-	MODE_AI,
-	MODE_COMMAND
+	MODE_VISUAL_LINE
 };
 
 enum editorKey {
@@ -216,7 +219,7 @@ enum paneType {
 	PANE_EDITOR,
 	PANE_EXPLORER,
 	PANE_AI,
-	PANE_PLUGIN
+	PANE_RUNNER
 };
 
 enum terminalType {
@@ -224,28 +227,6 @@ enum terminalType {
 	TERM_XTERM_256,
 	TERM_TRUECOLOR,
 	TERM_BASIC
-};
-
-enum themePreset {
-	THEME_MITHRAEUM,
-	THEME_DARK,
-	THEME_LIGHT,
-	THEME_SOLARIZED,
-	THEME_GRUVBOX,
-	THEME_MONOKAI,
-	THEME_NORD,
-	THEME_DRACULA,
-	THEME_TOKYONIGHT,
-	THEME_CATPPUCCIN,
-	THEME_ONEDARK,
-	THEME_MATERIAL,
-	THEME_EVERFOREST,
-	THEME_ROSEPINE,
-	THEME_GITHUB_DARK,
-	THEME_GITHUB_LIGHT,
-	THEME_AYU,
-	THEME_KANAGAWA,
-	THEME_CUSTOM
 };
 
 enum splitDirection {
@@ -292,7 +273,6 @@ typedef struct undoState {
 	int yank_buffer_len;
 	struct undoState *next;
 	time_t timestamp;
-	enum editorMode mode;
 } undoState;
 
 typedef struct explorerData {
@@ -303,45 +283,33 @@ typedef struct explorerData {
 	int scroll_offset;
 } explorerData;
 
-typedef struct pluginAPI {
-	void (*insert_text)(const char *text);
-	char *(*get_current_line)(void);
-	void (*set_status)(const char *, ...);
-	int (*get_cursor_pos)(int *x, int *y);
-	void (*move_cursor)(int x, int y);
-	char *(*get_selection)(void);
-	void (*replace_selection)(const char *text);
-} pluginAPI;
+typedef struct runnerData {
+	char **lines;
+	int count;
+	int cap;
+	int selected;
+	int scroll_offset;
+	int running;
+	int exit_code;
+	pid_t pid;
+	FILE *fp;
+	pthread_t thread;
+	int thread_valid;
+	int truncated;
+	pthread_mutex_t lock;
+	char cmd[512];
+} runnerData;
 
-typedef struct pluginData {
-	void *handle;
-	char *name;
-	char *path;
-	void (*init)(struct pluginAPI *api);
-	void (*update)(void);
-	void (*cleanup)(void);
-	void (*process_key)(int key);
-	void (*process_command)(const char *cmd);
-	void *context;
-	int active;
-} pluginData;
-
-/* history role tags: render uses these to pick prefix + color, replacing
- * the old msg_idx%2 alternation that scrambled colors when system lines
- * were interleaved with user/assistant turns. */
 #define HK_ROLE_SYSTEM 0
 #define HK_ROLE_USER   1
 #define HK_ROLE_AI     2
 
 typedef struct aiData {
-	/* display state (owned by hako, hako manages the API conversation) */
 	char **history;
 	unsigned char *history_role;
 	int history_count;
-	int history_pos;
 	int scroll_offset;
 	int spinner_frame;
-	int cursor_x;
 	int cursor_y;
 	enum editorMode mode;
 	int visual_mode;
@@ -352,29 +320,13 @@ typedef struct aiData {
 	int prompt_cursor;
 	int prompt_capacity;
 	char *current_prompt;
-	char *current_response;
-	int active;
 	int streaming;
 	pthread_mutex_t lock;
-	/* live-streaming slot: index into history[] being updated as tokens arrive */
-	int stream_slot;
-	char *stream_acc;        /* accumulated raw token text */
-	size_t stream_acc_len;
-	/* token usage (received from hako "done" events) */
-	int last_in_tokens;
-	int last_out_tokens;
-	long total_in_tokens;
-	long total_out_tokens;
-	/* pending tool-permission request (protocol 2 — see PROTOCOL.md). When
-	   perm_pending, the pane intercepts y/n/a and replies permission_response. */
 	int perm_pending;
 	int perm_id;
 	char perm_tool[64];
 	char perm_kind[16];
 	char perm_subject[1024];
-	/* launch outcome, so :install-agent / the pane footer know the real state.
-	   0 = connected, -2 = no agent on system, -3 = built without agent. */
-	int launch_status;
 } aiData;
 
 typedef struct editorPane {
@@ -402,8 +354,8 @@ typedef struct editorPane {
 	int redo_stack_size;
 	
 	explorerData *explorer;
-	pluginData *plugin;
 	aiData *ai;
+	runnerData *runner;
 	
 	char *pane_yank_buffer;
 	int pane_yank_buffer_len;
@@ -425,25 +377,12 @@ typedef struct {
 	Color keyword1;
 	Color keyword2;
 	Color string;
-	Color number;
-	Color match;
-	Color preprocessor;
-	Color function;
-	Color type;
-	Color operator;
-	Color bracket;
 	Color line_number;
 	Color status_bg;
 	Color status_fg;
 	Color border;
 	Color visual_bg;
 	Color visual_fg;
-	Color constant;
-	Color builtin;
-	Color attribute;
-	Color char_literal;
-	Color escape;
-	Color label;
 } Theme;
 
 struct editorSyntax {
@@ -458,9 +397,6 @@ struct editorSyntax {
 
 typedef struct {
 	char *query;
-	int last_match_row;
-	int last_match_col;
-	int direction;
 	int wrap_search;
 } SearchState;
 
@@ -468,7 +404,6 @@ typedef struct pasteBuffer {
 	char *data;
 	int len;
 	int is_line_mode;
-	time_t timestamp;
 } pasteBuffer;
 
 struct editorConfig {
@@ -484,7 +419,6 @@ struct editorConfig {
 	int tab_stop;
 	int use_tabs;
 	int word_wrap;
-	int word_wrap_column;
 	int show_line_numbers;
 	int line_number_width;
 	int max_undo_levels;
@@ -499,6 +433,7 @@ struct editorConfig {
 	editorPane *active_pane;
 	editorPane *left_panel;
 	editorPane *right_panel;
+	editorPane *bottom_panel;
 	int num_panes;
 	int left_panel_width;
 	int right_panel_width;
@@ -506,7 +441,6 @@ struct editorConfig {
 	int in_window_command;
 	int force_window_command;
 	int splash_active;
-	int splash_dismissed;
 	int full_redraw_pending;
 
 	int popup_active;
@@ -529,51 +463,36 @@ struct editorConfig {
 	char *ai_name;
 	char *ai_kanji;
 
-	int explorer_enabled;
 	int explorer_width;
 	int explorer_show_hidden;
-	int explorer_auto_open;
-	
+
 	SearchState search;
-	
+
 	enum terminalType term_type;
-	enum themePreset theme_preset;
 	Theme theme;
-	
+
 	int is_pasting;
-	int paste_indent_level;
-	
+
 	int mouse_enabled;
 	int mouse_x, mouse_y;
-	int mouse_button;
-	
-	pluginData *plugins[PLUGIN_MAX];
-	int plugin_count;
-	char *plugin_dir;
-	pluginAPI plugin_api;
-	
-	/* hako session info (received from hako "init" / "done" events) */
+
 	char *hako_session_id;
 	int hako_session_turns;
 	int hako_session_resumed;
-	char *hako_agent_version;  /* init.version — agent binary version, display only */
-	int hako_protocol;         /* init.protocol — wire version; absent ⇒ 1 (see PROTOCOL.md) */
-	int hako_auto_approve;     /* :auto/:noauto — editor-side mirror of agent auto-approve */
+	int hako_protocol;
 
 	int auto_indent;
 	int smart_indent;
-	int indent_guides;
 	int scroll_speed;
-	int relative_line_numbers;
 
 	char *config_path;
+	char *build_cmd;
+	char *test_cmd;
+	char *run_cmd;
 
-	/* modal state: counts, registers, marks, jumps, dot-repeat */
 	struct {
 		int pending_count;
 		char pending_reg;
-		char pending_op;
-		int op_start_x, op_start_y;
 		int waiting_reg;
 
 		pasteBuffer registers[32];
@@ -587,9 +506,6 @@ struct editorConfig {
 
 		char last_op;
 		int last_count;
-		char last_reg;
-		char last_motion;
-		int last_motion_arg;
 		char *last_insert;
 		int last_insert_len;
 		int recording_insert;
@@ -653,11 +569,10 @@ int editorGetIndent(erow *row);
 void editorSetMode(enum editorMode mode);
 void editorColonCommand(void);
 int editorIsInVisualSelection(int row, int col);
-void editorProcessMouse(int button, int x, int y);
+void editorProcessMouse(int x, int y);
 void editorHandleScroll(int direction);
 void editorCopyToSystemClipboard(void);
 void editorPasteFromSystemClipboard(void);
-void editorInitPasteBuffer(void);
 void editorFreePasteBuffer(void);
 void editorSetPasteBuffer(const char *data, int len, int is_line_mode);
 void hkSetRegister(char name, const char *data, int len, int is_line, int is_yank);
@@ -669,15 +584,21 @@ static char *hakoFindBinary(void);
 static int hakoLaunch(aiData *data);
 static void hakoShutdown(void);
 static void hakoSendLine(const char *json);
-static void hakoInstallOrUpdate(aiData *data, int update);  /* :install-agent / :update-agent */
+static void hakoInstallOrUpdate(aiData *data, int update);
 static void hakoHandleEvent(aiData *data, const char *line);
 static void *hakoReaderThread(void *arg);
 void aiWorkerSend(aiData *data);
 int hkHandleSlash(aiData *data, const char *prompt);
+static void runnerStart(const char *cmd);
+static void hkCloseSidePanel(editorPane **panel, editorPane *fallback);
+static void runnerCleanup(editorPane *pane);
+static void runnerErrorStep(int dir);
+static void hkShellPopup(const char *cmdline);
+void runnerRender(editorPane *pane, struct abuf *ab);
+void runnerHandleKey(editorPane *pane, int key);
 
 editorPane *editorCreatePane(enum paneType type, int x, int y, int width, int height);
 void editorFreePane(editorPane *pane);
-editorPane *editorGetActivePane(void);
 void editorSplitPane(int vertical);
 void editorClosePane(void);
 void editorNextPane(void);
@@ -724,10 +645,7 @@ void gridFlush(struct abuf *out);
 int is_separator(int c);
 void setThemeColor(struct abuf *ab, Color color);
 void setThemeBgColor(struct abuf *ab, Color color);
-int editorSyntaxToColor(int hl);
 Color editorSyntaxToRGB(int hl);
-void setColor(struct abuf *ab, int color);
-void setBgColor(struct abuf *ab, int color);
 void detectTerminalType(void);
 void enableRawMode(void);
 int getWindowSize(int *rows, int *cols);
@@ -1183,7 +1101,7 @@ char *TOML_HL_keywords[] = {
 
 char *HAKE_HL_extensions[] = {".hakorc", "hakorc", NULL};
 char *HAKE_HL_keywords[] = {
-	"tab_stop", "use_tabs", "word_wrap", "word_wrap_column",
+	"tab_stop", "use_tabs", "word_wrap",
 	"show_line_numbers", "max_undo_levels", "explorer_enabled",
 	"explorer_width", "explorer_show_hidden", "show_splash", "mode",
 	"theme", "theme_dark", "theme_light", "theme_solarized", "theme_gruvbox",
@@ -1194,7 +1112,7 @@ char *HAKE_HL_keywords[] = {
 	"theme_bracket", "theme_line_number", "theme_status_bg", "theme_status_fg",
 	"theme_border", "theme_visual_bg", "theme_visual_fg",
 	"auto_indent", "smart_indent", "mouse_enabled", "scroll_speed",
-	"relative_numbers", "plugin_dir", "true", "false", "normal", "insert", "1", "0", NULL
+	"relative_numbers", "true", "false", "normal", "insert", "1", "0", NULL
 };
 
 char *DEFAULT_HL_extensions[] = {NULL};
@@ -1327,21 +1245,16 @@ void detectTerminalType() {
 		return;
 	}
 
-	if (colorterm) {
-		if (strcmp(colorterm, "truecolor") == 0 || strcmp(colorterm, "24bit") == 0) {
-			E.term_type = TERM_TRUECOLOR;
-			return;
-		}
+	if (colorterm && (strcmp(colorterm, "truecolor") == 0 || strcmp(colorterm, "24bit") == 0)) {
+		E.term_type = TERM_TRUECOLOR;
+		return;
 	}
 
-	if (term) {
-		if (strstr(term, "256color") || strstr(term, "kitty") ||
-			strstr(term, "alacritty") || strstr(term, "ghostty") ||
-			strstr(term, "wezterm") || strstr(term, "iterm")) {
-			E.term_type = TERM_XTERM_256;
-		} else if (strstr(term, "xterm")) {
-			E.term_type = TERM_XTERM_256;
-		}
+	if (term && (strstr(term, "256color") || strstr(term, "kitty") ||
+		strstr(term, "alacritty") || strstr(term, "ghostty") ||
+		strstr(term, "wezterm") || strstr(term, "iterm") ||
+		strstr(term, "xterm"))) {
+		E.term_type = TERM_XTERM_256;
 	}
 }
 
@@ -1400,14 +1313,10 @@ void enableRawMode() {
 int getWindowSize(int *rows, int *cols) {
 	struct winsize ws;
 
-	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
-		if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
-		return -1;
-	} else {
-		*cols = ws.ws_col;
-		*rows = ws.ws_row;
-		return 0;
-	}
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) return -1;
+	*cols = ws.ws_col;
+	*rows = ws.ws_row;
+	return 0;
 }
 
 int editorInputPending() {
@@ -1484,11 +1393,8 @@ void gridClear(Color bg) {
 	int n = E.grid_w * E.grid_h;
 	for (int i = 0; i < n; i++) {
 		Cell *c = &E.grid_back[i];
+		memset(c->ch, 0, sizeof(c->ch));
 		c->ch[0] = ' ';
-		c->ch[1] = 0;
-		c->ch[2] = 0;
-		c->ch[3] = 0;
-		c->ch[4] = 0;
 		c->fg = E.theme.fg;
 		c->bg = bg;
 		c->width = 1;
@@ -1660,8 +1566,6 @@ static int utf8_display_width(const char *s) {
 	return col;
 }
 
-/* Return byte offset+length covering display cols [start_col, start_col+max_cols).
- * Also returns the actual display-cell count of the slice in *out_cols. */
 static void utf8_slice(const char *s, int start_col, int max_cols,
                        int *out_off, int *out_len, int *out_cols) {
 	int col = 0, i = 0, n = s ? (int)strlen(s) : 0;
@@ -1682,6 +1586,35 @@ static void utf8_slice(const char *s, int start_col, int max_cols,
 	if (out_off)  *out_off  = off;
 	if (out_len)  *out_len  = end - off;
 	if (out_cols) *out_cols = cols;
+}
+
+static int hkWrapWidth(editorPane *pane) {
+	int w = pane->width - E.line_number_width;
+	return w < 1 ? 1 : w;
+}
+
+static int hkRowWrapLines(erow *row, int w) {
+	int lines = (row->rsize + w - 1) / w;
+	return lines < 1 ? 1 : lines;
+}
+
+static int hkVisualRowOfLine(editorPane *pane, int y, int w) {
+	int v = 0;
+	for (int i = 0; i < y; i++) v += hkRowWrapLines(&pane->row[i], w);
+	return v;
+}
+
+static int hkRowAtVisual(editorPane *pane, int target, int w, int *seg) {
+	int v = 0;
+	for (int r = 0; r < pane->numrows; r++) {
+		int lines = hkRowWrapLines(&pane->row[r], w);
+		if (v + lines > target) {
+			if (seg) *seg = target - v;
+			return r;
+		}
+		v += lines;
+	}
+	return -1;
 }
 
 /*** color ***/
@@ -1738,48 +1671,6 @@ void setThemeBgColor(struct abuf *ab, Color color) {
 	abAppend(ab, buf, strlen(buf));
 }
 
-int editorSyntaxToColor(int hl) {
-	switch (hl) {
-	case HL_COMMENT:
-	case HL_MLCOMMENT:
-		return E.term_type == TERM_TRUECOLOR ? 0x6A9955 : (E.term_type == TERM_XTERM_256 ? 65 : 36);
-	case HL_KEYWORD1:
-		return E.term_type == TERM_TRUECOLOR ? 0x569CD6 : (E.term_type == TERM_XTERM_256 ? 69 : 34);
-	case HL_KEYWORD2:
-		return E.term_type == TERM_TRUECOLOR ? 0x4EC9B0 : (E.term_type == TERM_XTERM_256 ? 73 : 36);
-	case HL_STRING:
-		return E.term_type == TERM_TRUECOLOR ? 0xCE9178 : (E.term_type == TERM_XTERM_256 ? 173 : 33);
-	case HL_NUMBER:
-		return E.term_type == TERM_TRUECOLOR ? 0xB5CEA8 : (E.term_type == TERM_XTERM_256 ? 151 : 32);
-	case HL_MATCH:
-		return E.term_type == TERM_TRUECOLOR ? 0xFFFF00 : (E.term_type == TERM_XTERM_256 ? 226 : 33);
-	case HL_PREPROCESSOR:
-		return E.term_type == TERM_TRUECOLOR ? 0xC586C0 : (E.term_type == TERM_XTERM_256 ? 176 : 35);
-	case HL_FUNCTION:
-		return E.term_type == TERM_TRUECOLOR ? 0xDCDCAA : (E.term_type == TERM_XTERM_256 ? 187 : 33);
-	case HL_TYPE:
-		return E.term_type == TERM_TRUECOLOR ? 0x4EC9B0 : (E.term_type == TERM_XTERM_256 ? 73 : 36);
-	case HL_OPERATOR:
-		return E.term_type == TERM_TRUECOLOR ? 0xD4D4D4 : (E.term_type == TERM_XTERM_256 ? 188 : 37);
-	case HL_BRACKET:
-		return E.term_type == TERM_TRUECOLOR ? 0xDA70D6 : (E.term_type == TERM_XTERM_256 ? 170 : 35);
-	case HL_CONSTANT:
-		return E.term_type == TERM_TRUECOLOR ? 0x569CD6 : (E.term_type == TERM_XTERM_256 ? 69 : 34);
-	case HL_BUILTIN:
-		return E.term_type == TERM_TRUECOLOR ? 0xDCDCAA : (E.term_type == TERM_XTERM_256 ? 187 : 33);
-	case HL_ATTRIBUTE:
-		return E.term_type == TERM_TRUECOLOR ? 0x9CDCFE : (E.term_type == TERM_XTERM_256 ? 117 : 36);
-	case HL_CHAR:
-		return E.term_type == TERM_TRUECOLOR ? 0xE06C75 : (E.term_type == TERM_XTERM_256 ? 167 : 31);
-	case HL_ESCAPE:
-		return E.term_type == TERM_TRUECOLOR ? 0xD19A66 : (E.term_type == TERM_XTERM_256 ? 173 : 33);
-	case HL_LABEL:
-		return E.term_type == TERM_TRUECOLOR ? 0xC678DD : (E.term_type == TERM_XTERM_256 ? 176 : 35);
-	default:
-		return E.term_type == TERM_TRUECOLOR ? 0xD4D4D4 : (E.term_type == TERM_XTERM_256 ? 188 : 37);
-	}
-}
-
 Color editorSyntaxToRGB(int hl) {
 	int rgb;
 	switch (hl) {
@@ -1806,47 +1697,8 @@ Color editorSyntaxToRGB(int hl) {
 	return c;
 }
 
-void setColor(struct abuf *ab, int color) {
-	char buf[32];
-	
-	if (E.term_type == TERM_TRUECOLOR) {
-		int r = (color >> 16) & 0xFF;
-		int g = (color >> 8) & 0xFF;
-		int b = color & 0xFF;
-		snprintf(buf, sizeof(buf), "\x1b[38;2;%d;%d;%dm", r, g, b);
-	} else if (E.term_type == TERM_XTERM_256) {
-		snprintf(buf, sizeof(buf), "\x1b[38;5;%dm", color);
-	} else {
-		snprintf(buf, sizeof(buf), "\x1b[%dm", color);
-	}
-	abAppend(ab, buf, strlen(buf));
-}
-
-void setBgColor(struct abuf *ab, int color) {
-	char buf[32];
-	
-	if (E.term_type == TERM_TRUECOLOR) {
-		int r = (color >> 16) & 0xFF;
-		int g = (color >> 8) & 0xFF;
-		int b = color & 0xFF;
-		snprintf(buf, sizeof(buf), "\x1b[48;2;%d;%d;%dm", r, g, b);
-	} else if (E.term_type == TERM_XTERM_256) {
-		snprintf(buf, sizeof(buf), "\x1b[48;5;%dm", color);
-	} else {
-		snprintf(buf, sizeof(buf), "\x1b[%dm", color + 10);
-	}
-	abAppend(ab, buf, strlen(buf));
-}
-
 /*** clipboard ***/
 
-/* System clipboard transport. v0.1.3: previous chain
-   `xclip ... 2>/dev/null || pbcopy ...` had two bugs on macOS:
-   (1) xclip-not-found error was swallowed by 2>/dev/null but the shell still
-   spawned xclip's pipe-reader before pbcopy, so the first chunk of large yanks
-   could be lost; (2) `pbcopy` does its own line-ending normalization that can
-   confuse paste targets expecting raw bytes (esp. with mixed tabs+spaces).
-   Pick the right tool per OS, send bytes via stdin in one shot, no shell `||`. */
 static int hkSystemClipboardWrite(const char *data, int len) {
 	if (!data || len <= 0) return 0;
 	const char *cmd = NULL;
@@ -1903,41 +1755,11 @@ static int hkSystemClipboardRead(char **out, size_t *out_len) {
 	return 1;
 }
 
-void editorInitPasteBuffer() {
-	E.paste.data = NULL;
-	E.paste.len = 0;
-	E.paste.is_line_mode = 0;
-	E.paste.timestamp = 0;
-	
-	E.system_paste.data = NULL;
-	E.system_paste.len = 0;
-	E.system_paste.is_line_mode = 0;
-	E.system_paste.timestamp = 0;
-}
-
 void editorFreePasteBuffer() {
 	free(E.paste.data);
 	free(E.system_paste.data);
 	E.paste.data = NULL;
 	E.system_paste.data = NULL;
-}
-
-void editorSetPasteBuffer(const char *data, int len, int is_line_mode) {
-	free(E.paste.data);
-
-	if (len > PASTE_BUFFER_MAX) {
-		len = PASTE_BUFFER_MAX;
-		editorSetStatusMessage("Paste buffer truncated to %d bytes", PASTE_BUFFER_MAX);
-	}
-
-	E.paste.data = malloc(len + 1);
-	if (!E.paste.data) return;
-
-	memcpy(E.paste.data, data, len);
-	E.paste.data[len] = '\0';
-	E.paste.len = len;
-	E.paste.is_line_mode = is_line_mode;
-	E.paste.timestamp = time(NULL);
 }
 
 static int hkRegIndex(char name) {
@@ -1959,7 +1781,6 @@ static void hkRegAssign(pasteBuffer *r, const char *data, int len, int is_line) 
 	r->data[len] = '\0';
 	r->len = len;
 	r->is_line_mode = is_line;
-	r->timestamp = time(NULL);
 }
 
 static void hkRegAppend(pasteBuffer *r, const char *data, int len, int is_line) {
@@ -1975,7 +1796,14 @@ static void hkRegAppend(pasteBuffer *r, const char *data, int len, int is_line) 
 	r->data = nb;
 	r->len = newlen;
 	r->is_line_mode = is_line;
-	r->timestamp = time(NULL);
+}
+
+void editorSetPasteBuffer(const char *data, int len, int is_line_mode) {
+	if (len > PASTE_BUFFER_MAX) {
+		len = PASTE_BUFFER_MAX;
+		editorSetStatusMessage("Paste buffer truncated to %d bytes", PASTE_BUFFER_MAX);
+	}
+	hkRegAssign(&E.paste, data, len, is_line_mode);
 }
 
 void hkSetRegister(char name, const char *data, int len, int is_line, int is_yank) {
@@ -2063,8 +1891,6 @@ void editorPasteFromSystemClipboard() {
 	E.auto_indent = 0;
 	E.smart_indent = 0;
 
-	/* Insert bytes verbatim so tabs/indents survive round-trip. fgets-based reader
-	   used to drop the trailing NUL on lines without newlines; raw byte walk fixes that. */
 	for (size_t i = 0; i < total; i++) {
 		unsigned char c = (unsigned char)E.system_paste.data[i];
 		if (c == '\n' || c == '\r') {
@@ -2075,8 +1901,7 @@ void editorPasteFromSystemClipboard() {
 		} else if (c >= 32 || c >= 0x80) {
 			editorInsertChar((char)c);
 		}
-		/* drop other control bytes silently */
-	}
+		}
 	editorSetStatusMessage("Pasted %zu bytes from system clipboard", total);
 
 	E.auto_indent = saved_auto_indent;
@@ -2096,33 +1921,7 @@ editorPane *editorCreatePane(enum paneType type, int x, int y, int width, int he
 	pane->y = y;
 	pane->width = width;
 	pane->height = height;
-	pane->cx = 0;
-	pane->cy = 0;
-	pane->rx = 0;
-	pane->rowoff = 0;
-	pane->coloff = 0;
-	pane->numrows = 0;
-	pane->row = NULL;
-	pane->filename = NULL;
-	pane->dirty = 0;
-	pane->syntax = NULL;
-	pane->visual_anchor_x = 0;
-	pane->visual_anchor_y = 0;
-	pane->undo_stack = NULL;
-	pane->redo_stack = NULL;
-	pane->undo_stack_size = 0;
-	pane->redo_stack_size = 0;
-	pane->explorer = NULL;
-	pane->plugin = NULL;
-	pane->ai = NULL;
-	pane->pane_yank_buffer = NULL;
-	pane->pane_yank_buffer_len = 0;
-	pane->parent = NULL;
-	pane->child1 = NULL;
-	pane->child2 = NULL;
-	pane->split_dir = SPLIT_NONE;
 	pane->split_ratio = 0.5;
-	pane->is_focused = 0;
 	pane->wrap_lines = E.word_wrap;
 
 	return pane;
@@ -2163,6 +1962,10 @@ void editorFreePane(editorPane *pane) {
 		explorerCleanup(pane);
 	}
 
+	if (pane->type == PANE_RUNNER) {
+		runnerCleanup(pane);
+	}
+
 	if (pane->type == PANE_AI && pane->ai) {
 		hakoShutdown();
 		pthread_mutex_destroy(&pane->ai->lock);
@@ -2172,17 +1975,11 @@ void editorFreePane(editorPane *pane) {
 		free(pane->ai->history);
 		free(pane->ai->history_role);
 		free(pane->ai->current_prompt);
-		free(pane->ai->current_response);
 		free(pane->ai->prompt_buffer);
-		free(pane->ai->stream_acc);
 		free(pane->ai);
 	}
 
 	free(pane);
-}
-
-editorPane *editorGetActivePane() {
-	return E.active_pane;
 }
 
 editorPane *editorFindPaneById(editorPane *root, int id) {
@@ -2242,6 +2039,38 @@ void editorCollectLeafPanes(editorPane *root, editorPane ***panes, int *count) {
 		editorCollectLeafPanes(root->child1, panes, count);
 		editorCollectLeafPanes(root->child2, panes, count);
 	}
+}
+
+static int hkLeafCount(void) {
+	editorPane **leaves = NULL;
+	int n = 0;
+	editorCollectLeafPanes(E.root_pane, &leaves, &n);
+	free(leaves);
+	return n;
+}
+
+static editorPane *hkFirstEditorLeaf(void) {
+	editorPane **leaves = NULL;
+	int n = 0;
+	editorPane *target = NULL;
+	editorCollectLeafPanes(E.root_pane, &leaves, &n);
+	for (int i = 0; i < n; i++) {
+		if (leaves[i] && leaves[i]->type == PANE_EDITOR) {
+			target = leaves[i];
+			break;
+		}
+	}
+	free(leaves);
+	return target;
+}
+
+static void hkResetPaneBuffer(editorPane *pane) {
+	for (int i = 0; i < pane->numrows; i++) editorFreeRow(&pane->row[i]);
+	free(pane->row);
+	pane->row = NULL;
+	pane->numrows = 0;
+	pane->cx = pane->cy = 0;
+	pane->rowoff = pane->coloff = 0;
 }
 
 void editorSplitPane(int vertical) {
@@ -2328,13 +2157,13 @@ void editorClosePane() {
 		E.force_window_command = 0;
 		return;
 	}
+	if (pane == E.bottom_panel) {
+		hkCloseSidePanel(&E.bottom_panel, NULL);
+		E.force_window_command = 0;
+		return;
+	}
 
-	int editor_leaves = 0;
-	editorPane **leaves = NULL;
-	editorCollectLeafPanes(E.root_pane, &leaves, &editor_leaves);
-	free(leaves);
-
-	if (pane->type == PANE_EDITOR && editor_leaves <= 1) {
+	if (pane->type == PANE_EDITOR && hkLeafCount() <= 1) {
 		if (E.right_panel || E.left_panel) {
 			editorSetStatusMessage("Cannot close last workspace while side pane open");
 			return;
@@ -2389,7 +2218,7 @@ void editorClosePane() {
 }
 
 void editorNextPane() {
-	editorPane **all_panes = malloc(sizeof(editorPane*) * (MAX_PANES + 2));
+	editorPane **all_panes = malloc(sizeof(editorPane*) * (MAX_PANES + 3));
 	int total = 0;
 	
 	if (E.left_panel) {
@@ -2408,7 +2237,11 @@ void editorNextPane() {
 	if (E.right_panel) {
 		all_panes[total++] = E.right_panel;
 	}
-	
+
+	if (E.bottom_panel) {
+		all_panes[total++] = E.bottom_panel;
+	}
+
 	if (total <= 1) {
 		free(all_panes);
 		return;
@@ -2434,13 +2267,21 @@ void editorNextPane() {
 void editorResizePanes() {
 	if (!E.root_pane) return;
 
+	int bottom_h = 0;
+	if (E.bottom_panel) {
+		bottom_h = E.screenrows / 3;
+		if (bottom_h < 5) bottom_h = 5;
+		if (bottom_h > 12) bottom_h = 12;
+		if (bottom_h > E.screenrows - 6) bottom_h = MAX(0, E.screenrows - 6);
+	}
+	int rows = E.screenrows - bottom_h;
+
 	int left_w = E.left_panel ? E.left_panel_width : 0;
 	int right_w = E.right_panel ? E.right_panel_width : 0;
 	int min_editor = 24;
 	int stack_vertical = 0;
 
-	/* AI too wide for side-by-side: stack below if rows allow */
-	if (E.right_panel && E.screencols < min_editor + left_w + right_w && E.screenrows >= 16) {
+	if (E.right_panel && E.screencols < min_editor + left_w + right_w && rows >= 16) {
 		stack_vertical = 1;
 		right_w = 0;
 	}
@@ -2453,36 +2294,43 @@ void editorResizePanes() {
 	int left_border = (E.left_panel && left_w > 0) ? 1 : 0;
 	int ai_h = 0;
 	if (stack_vertical) {
-		ai_h = E.screenrows / 2;
+		ai_h = rows / 2;
 		if (ai_h < 6) ai_h = 6;
-		if (ai_h > E.screenrows - 6) ai_h = E.screenrows - 6;
+		if (ai_h > rows - 6) ai_h = rows - 6;
 	}
 
 	E.root_pane->x = left_w + left_border;
 	E.root_pane->y = 0;
 	E.root_pane->width = E.screencols - left_w - left_border - right_w;
 	if (E.root_pane->width < 1) E.root_pane->width = 1;
-	E.root_pane->height = E.screenrows - ai_h;
+	E.root_pane->height = rows - ai_h;
 
 	if (E.left_panel) {
 		E.left_panel->x = 0;
 		E.left_panel->y = 0;
 		E.left_panel->width = left_w;
-		E.left_panel->height = E.screenrows - ai_h;
+		E.left_panel->height = rows - ai_h;
 	}
 
 	if (E.right_panel) {
 		if (stack_vertical) {
 			E.right_panel->x = 0;
-			E.right_panel->y = E.screenrows - ai_h;
+			E.right_panel->y = rows - ai_h;
 			E.right_panel->width = E.screencols;
 			E.right_panel->height = ai_h;
 		} else {
 			E.right_panel->x = E.screencols - right_w;
 			E.right_panel->y = 0;
 			E.right_panel->width = right_w;
-			E.right_panel->height = E.screenrows;
+			E.right_panel->height = rows;
 		}
+	}
+
+	if (E.bottom_panel) {
+		E.bottom_panel->x = 0;
+		E.bottom_panel->y = rows;
+		E.bottom_panel->width = E.screencols;
+		E.bottom_panel->height = bottom_h;
 	}
 
 	editorUpdatePaneBounds(E.root_pane);
@@ -2551,12 +2399,6 @@ void editorUpdateSyntax(erow *row) {
 	while (i < row->rsize) {
 		char c = row->render[i];
 		unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;
-
-		if (row->hl[i] == HL_MATCH) {
-			i++;
-			prev_sep = 0;
-			continue;
-		}
 
 		if (scs_len && !in_string && !in_comment) {
 			if (!strncmp(&row->render[i], scs, scs_len)) {
@@ -2969,8 +2811,7 @@ void editorMoveCursor(int key) {
 	case ARROW_UP:
 	case 'k':
 		if (E.word_wrap && pane->wrap_lines && row) {
-			int wrap_width = pane->width - E.line_number_width;
-			if (wrap_width < 1) wrap_width = 1;
+			int wrap_width = hkWrapWidth(pane);
 			
 			int rx = editorRowCxToRx(row, pane->cx);
 			int current_wrap_line = rx / wrap_width;
@@ -2986,11 +2827,10 @@ void editorMoveCursor(int key) {
 		if (pane->cy > 0) {
 			pane->cy--;
 			if (E.word_wrap && pane->wrap_lines && pane->cy < pane->numrows) {
-				int wrap_width = pane->width - E.line_number_width;
-				if (wrap_width < 1) wrap_width = 1;
+				int wrap_width = hkWrapWidth(pane);
 				
 				erow *prev_row = &pane->row[pane->cy];
-				int prev_lines = (prev_row->rsize + wrap_width - 1) / wrap_width;
+				int prev_lines = hkRowWrapLines(prev_row, wrap_width);
 				if (prev_lines > 1) {
 					int target_rx = (prev_lines - 1) * wrap_width + (pane->rx % wrap_width);
 					if (target_rx > prev_row->rsize) target_rx = prev_row->rsize;
@@ -3003,12 +2843,11 @@ void editorMoveCursor(int key) {
 	case ARROW_DOWN:
 	case 'j':
 		if (E.word_wrap && pane->wrap_lines && row) {
-			int wrap_width = pane->width - E.line_number_width;
-			if (wrap_width < 1) wrap_width = 1;
+			int wrap_width = hkWrapWidth(pane);
 			
 			int rx = editorRowCxToRx(row, pane->cx);
 			int current_wrap_line = rx / wrap_width;
-			int total_wrap_lines = (row->rsize + wrap_width - 1) / wrap_width;
+			int total_wrap_lines = hkRowWrapLines(row, wrap_width);
 			
 			if (current_wrap_line < total_wrap_lines - 1) {
 				int target_rx = rx + wrap_width;
@@ -3021,8 +2860,7 @@ void editorMoveCursor(int key) {
 		if (pane->numrows > 0 && pane->cy < pane->numrows - 1) {
 			pane->cy++;
 			if (E.word_wrap && pane->wrap_lines && pane->cy < pane->numrows) {
-				int wrap_width = pane->width - E.line_number_width;
-				if (wrap_width < 1) wrap_width = 1;
+				int wrap_width = hkWrapWidth(pane);
 				
 				int target_rx = pane->rx % wrap_width;
 				erow *next_row = &pane->row[pane->cy];
@@ -3055,16 +2893,9 @@ void editorScroll() {
 	}
 
 	if (E.word_wrap && pane->wrap_lines) {
-		int wrap_width = pane->width - E.line_number_width;
-		if (wrap_width < 1) wrap_width = 1;
+		int wrap_width = hkWrapWidth(pane);
 		
-		int visual_row = 0;
-		for (int i = 0; i < pane->cy; i++) {
-			int lines = (pane->row[i].rsize + wrap_width - 1) / wrap_width;
-			if (lines < 1) lines = 1;
-			visual_row += lines;
-		}
-		
+		int visual_row = hkVisualRowOfLine(pane, pane->cy, wrap_width);
 		if (pane->cy < pane->numrows) {
 			visual_row += pane->rx / wrap_width;
 		}
@@ -3292,7 +3123,6 @@ undoState *editorCreateUndoState() {
 	state->cy = pane->cy;
 	state->filename = pane->filename ? strdup(pane->filename) : NULL;
 	state->timestamp = time(NULL);
-	state->mode = E.mode;
 
 	if (E.paste.data && E.paste.len > 0) {
 		state->yank_buffer = malloc(E.paste.len + 1);
@@ -3360,6 +3190,20 @@ void editorFreeUndoState(undoState *state) {
 	free(state);
 }
 
+static void hkTrimStack(undoState **stack, int *size) {
+	undoState *curr = *stack;
+	undoState *prev = NULL;
+	while (curr && curr->next) {
+		prev = curr;
+		curr = curr->next;
+	}
+	if (prev) {
+		editorFreeUndoState(curr);
+		prev->next = NULL;
+		(*size)--;
+	}
+}
+
 void editorSaveState() {
 	editorPane *pane = E.active_pane;
 	if (!pane || pane->type != PANE_EDITOR) return;
@@ -3368,20 +3212,8 @@ void editorSaveState() {
 		return;
 	}
 
-	if (pane->undo_stack_size >= E.max_undo_levels) {
-		undoState *curr = pane->undo_stack;
-		undoState *prev = NULL;
-		while (curr && curr->next) {
-			prev = curr;
-			curr = curr->next;
-		}
-
-		if (prev) {
-			editorFreeUndoState(curr);
-			prev->next = NULL;
-			pane->undo_stack_size--;
-		}
-	}
+	if (pane->undo_stack_size >= E.max_undo_levels)
+		hkTrimStack(&pane->undo_stack, &pane->undo_stack_size);
 
 	undoState *state = editorCreateUndoState();
 	if (!state) return;
@@ -3444,113 +3276,57 @@ void editorRestoreState(undoState *state) {
 	pane->dirty++;
 }
 
-void editorUndo() {
+static void hkUndoRedo(int redo) {
 	editorPane *pane = E.active_pane;
 	if (!pane || pane->type != PANE_EDITOR) return;
 
-	if (!pane->undo_stack) {
-		editorSetStatusMessage("Nothing to undo");
+	undoState **from = redo ? &pane->redo_stack : &pane->undo_stack;
+	int *from_size   = redo ? &pane->redo_stack_size : &pane->undo_stack_size;
+	undoState **to   = redo ? &pane->undo_stack : &pane->redo_stack;
+	int *to_size     = redo ? &pane->undo_stack_size : &pane->redo_stack_size;
+
+	if (!*from) {
+		editorSetStatusMessage(redo ? "Nothing to redo" : "Nothing to undo");
 		return;
 	}
 
-	undoState *current_state = editorCreateUndoState();
-	if (current_state) {
-		current_state->next = pane->redo_stack;
-		pane->redo_stack = current_state;
-		pane->redo_stack_size++;
-
-		if (pane->redo_stack_size > E.max_undo_levels) {
-			undoState *curr = pane->redo_stack;
-			undoState *prev = NULL;
-			while (curr && curr->next) {
-				prev = curr;
-				curr = curr->next;
-			}
-			if (prev) {
-				editorFreeUndoState(curr);
-				prev->next = NULL;
-				pane->redo_stack_size--;
-			}
-		}
+	undoState *current = editorCreateUndoState();
+	if (current) {
+		current->next = *to;
+		*to = current;
+		(*to_size)++;
+		if (*to_size > E.max_undo_levels) hkTrimStack(to, to_size);
 	}
 
-	undoState *state = pane->undo_stack;
-	pane->undo_stack = state->next;
-	pane->undo_stack_size--;
+	undoState *state = *from;
+	*from = state->next;
+	(*from_size)--;
 
 	editorRestoreState(state);
 	editorFreeUndoState(state);
 
-	editorSetStatusMessage("Undo");
+	editorSetStatusMessage(redo ? "Redo" : "Undo");
+}
+
+void editorUndo() {
+	hkUndoRedo(0);
 }
 
 void editorRedo() {
-	editorPane *pane = E.active_pane;
-	if (!pane || pane->type != PANE_EDITOR) return;
-
-	if (!pane->redo_stack) {
-		editorSetStatusMessage("Nothing to redo");
-		return;
-	}
-
-	undoState *current_state = editorCreateUndoState();
-	if (current_state) {
-		current_state->next = pane->undo_stack;
-		pane->undo_stack = current_state;
-		pane->undo_stack_size++;
-
-		if (pane->undo_stack_size > E.max_undo_levels) {
-			undoState *curr = pane->undo_stack;
-			undoState *prev = NULL;
-			while (curr && curr->next) {
-				prev = curr;
-				curr = curr->next;
-			}
-			if (prev) {
-				editorFreeUndoState(curr);
-				prev->next = NULL;
-				pane->undo_stack_size--;
-			}
-		}
-	}
-
-	undoState *state = pane->redo_stack;
-	pane->redo_stack = state->next;
-	pane->redo_stack_size--;
-
-	editorRestoreState(state);
-	editorFreeUndoState(state);
-
-	editorSetStatusMessage("Redo");
+	hkUndoRedo(1);
 }
 
 /*** search ***/
+static void hkRefreshSyntax(editorPane *pane) {
+	for (int i = 0; i < pane->numrows; i++)
+		editorUpdateSyntax(&pane->row[i]);
+}
+
 void editorFindNext() {
 	editorPane *pane = E.active_pane;
 	if (!pane || pane->type != PANE_EDITOR || !E.search.query) return;
 
-	for (int i = 0; i < pane->numrows; i++) {
-		erow *row = &pane->row[i];
-		for (int j = 0; j < row->rsize; j++) {
-			if (row->hl[j] == HL_MATCH) {
-				row->hl[j] = HL_NORMAL;
-			}
-		}
-		editorUpdateSyntax(row);
-	}
-
-	int query_len = strlen(E.search.query);
-	for (int i = 0; i < pane->numrows; i++) {
-		erow *row = &pane->row[i];
-		char *m = strstr(row->render, E.search.query);
-		while (m) {
-			int pos = m - row->render;
-			for (int j = 0; j < query_len && pos + j < row->rsize; j++) {
-				row->hl[pos + j] = HL_MATCH;
-			}
-			m = strstr(m + 1, E.search.query);
-		}
-	}
+	hkRefreshSyntax(pane);
 
 	int current_row = pane->cy;
 	int current_col = pane->cx;
@@ -3571,11 +3347,8 @@ void editorFindNext() {
 			}
 		}
 
-		E.search.last_match_row = row_idx;
-		E.search.last_match_col = editorRowRxToCx(row, match - row->render);
-
 		pane->cy = row_idx;
-		pane->cx = E.search.last_match_col;
+		pane->cx = editorRowRxToCx(row, match - row->render);
 
 		editorSetStatusMessage("/%s (n=next, N=prev)", E.search.query);
 		return;
@@ -3592,28 +3365,7 @@ void editorFindPrev() {
 	editorPane *pane = E.active_pane;
 	if (!pane || pane->type != PANE_EDITOR || !E.search.query) return;
 
-	for (int i = 0; i < pane->numrows; i++) {
-		erow *row = &pane->row[i];
-		for (int j = 0; j < row->rsize; j++) {
-			if (row->hl[j] == HL_MATCH) {
-				row->hl[j] = HL_NORMAL;
-			}
-		}
-		editorUpdateSyntax(row);
-	}
-
-	int query_len = strlen(E.search.query);
-	for (int i = 0; i < pane->numrows; i++) {
-		erow *row = &pane->row[i];
-		char *m = strstr(row->render, E.search.query);
-		while (m) {
-			int pos = m - row->render;
-			for (int j = 0; j < query_len && pos + j < row->rsize; j++) {
-				row->hl[pos + j] = HL_MATCH;
-			}
-			m = strstr(m + 1, E.search.query);
-		}
-	}
+	hkRefreshSyntax(pane);
 
 	int current_row = pane->cy;
 	int current_col = pane->cx;
@@ -3640,11 +3392,8 @@ void editorFindPrev() {
 		}
 
 		if (last_match) {
-			E.search.last_match_row = row_idx;
-			E.search.last_match_col = editorRowRxToCx(row, last_match_pos);
-
 			pane->cy = row_idx;
-			pane->cx = E.search.last_match_col;
+			pane->cx = editorRowRxToCx(row, last_match_pos);
 
 			editorSetStatusMessage("?%s (n=next, N=prev)", E.search.query);
 			return;
@@ -3672,23 +3421,13 @@ void editorFind() {
 	if (query) {
 		free(E.search.query);
 		E.search.query = strdup(query);
-		E.search.direction = 1;
 		E.search.wrap_search = 1;
 
 		editorFindNext();
 
 		free(query);
 	} else {
-		for (int i = 0; i < pane->numrows; i++) {
-			erow *row = &pane->row[i];
-			for (int j = 0; j < row->rsize; j++) {
-				if (row->hl[j] == HL_MATCH) {
-					row->hl[j] = HL_NORMAL;
-				}
-			}
-			editorUpdateSyntax(row);
-		}
-
+		hkRefreshSyntax(pane);
 		pane->cx = saved_cx;
 		pane->cy = saved_cy;
 		pane->coloff = saved_coloff;
@@ -3876,31 +3615,24 @@ void editorDrawPane(editorPane *pane, struct abuf *ab) {
 		return;
 	}
 
-	int wrap_width = pane->width - E.line_number_width;
-	if (wrap_width < 1) wrap_width = 1;
+	if (pane->type == PANE_RUNNER) {
+		runnerRender(pane, ab);
+		return;
+	}
+
+	int wrap_width = hkWrapWidth(pane);
 
 	for (int screen_y = 0; screen_y < pane->height; screen_y++) {
 		int gy = pane->y + screen_y;
 		int gx = pane->x;
 
-		int filerow = -1;
+		int filerow;
 		int wrap_line = 0;
 
 		if (E.word_wrap && pane->wrap_lines) {
-			int visual_row = 0;
-			for (int i = 0; i < pane->numrows; i++) {
-				int lines = (pane->row[i].rsize + wrap_width - 1) / wrap_width;
-				if (lines < 1) lines = 1;
-				if (visual_row + lines > pane->rowoff + screen_y) {
-					filerow = i;
-					wrap_line = pane->rowoff + screen_y - visual_row;
-					break;
-				}
-				visual_row += lines;
-			}
+			filerow = hkRowAtVisual(pane, pane->rowoff + screen_y, wrap_width, &wrap_line);
 		} else {
 			filerow = pane->rowoff + screen_y;
-			wrap_line = 0;
 		}
 
 		if (filerow >= 0 && filerow < pane->numrows) {
@@ -3933,19 +3665,12 @@ void editorDrawPane(editorPane *pane, struct abuf *ab) {
 					(E.mode == MODE_VISUAL || E.mode == MODE_VISUAL_LINE) &&
 					editorIsInVisualSelection(filerow, j);
 
-				Color cell_fg, cell_bg;
-				if (is_selected) {
-					cell_fg = E.theme.visual_fg;
-					cell_bg = E.theme.visual_bg;
+				Color cell_bg = is_selected ? E.theme.visual_bg : E.theme.bg;
+				Color cell_fg;
+				if (row->hl && j < row->rsize && row->hl[j] != HL_NORMAL) {
+					cell_fg = editorSyntaxToRGB(row->hl[j]);
 				} else {
-					cell_bg = E.theme.bg;
-					if (row->hl && j < row->rsize && row->hl[j] == HL_NORMAL) {
-						cell_fg = E.theme.fg;
-					} else if (row->hl && j < row->rsize) {
-						cell_fg = editorSyntaxToRGB(row->hl[j]);
-					} else {
-						cell_fg = E.theme.fg;
-					}
+					cell_fg = E.theme.fg;
 				}
 
 				if (j < row->rsize) {
@@ -3996,8 +3721,15 @@ void editorDrawPane(editorPane *pane, struct abuf *ab) {
 /*** input ***/
 int editorReadKey() {
 	static int was_streaming = 0;
+	static unsigned char pushed_back = 0;
 	int nread;
 	char c;
+
+	if (pushed_back) {
+		c = (char)pushed_back;
+		pushed_back = 0;
+		return c;
+	}
 
 	while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
 		if (nread == -1 && errno != EAGAIN) die("read");
@@ -4010,7 +3742,8 @@ int editorReadKey() {
 			return CTRL_KEY('l');
 		}
 #endif
-		int is_streaming = (E.right_panel && E.right_panel->type == PANE_AI && E.right_panel->ai && E.right_panel->ai->streaming);
+		int is_streaming = (E.right_panel && E.right_panel->type == PANE_AI && E.right_panel->ai && E.right_panel->ai->streaming)
+			|| (E.bottom_panel && E.bottom_panel->runner && E.bottom_panel->runner->running);
 		if (is_streaming) { was_streaming = 1; return 0; }
 		if (was_streaming) { was_streaming = 0; return 0; }
 	}
@@ -4019,6 +3752,10 @@ int editorReadKey() {
 		char seq[32];
 
 		if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+		if (seq[0] != '[' && seq[0] != 'O') {
+			pushed_back = (unsigned char)seq[0];
+			return '\x1b';
+		}
 		if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
 
 		if (seq[0] == '[') {
@@ -4043,7 +3780,6 @@ int editorReadKey() {
 					} else if ((button == 0 || button == 1 || button == 2) && release == 'M') {
 						E.mouse_x = x - 1;
 						E.mouse_y = y - 1;
-						E.mouse_button = button;
 						return MOUSE_CLICK;
 					} else if (button >= 32 && button <= 35) {
 						return MOUSE_MOTION;
@@ -4216,6 +3952,10 @@ static editorPane *editorPaneAtCoord(int x, int y) {
 		y >= E.right_panel->y && y < E.right_panel->y + E.right_panel->height) {
 		return E.right_panel;
 	}
+	if (E.bottom_panel && x >= E.bottom_panel->x && x < E.bottom_panel->x + E.bottom_panel->width &&
+		y >= E.bottom_panel->y && y < E.bottom_panel->y + E.bottom_panel->height) {
+		return E.bottom_panel;
+	}
 	editorPane **leaves = NULL;
 	int count = 0;
 	editorCollectLeafPanes(E.root_pane, &leaves, &count);
@@ -4231,8 +3971,7 @@ static editorPane *editorPaneAtCoord(int x, int y) {
 	return hit;
 }
 
-void editorProcessMouse(int button, int x, int y) {
-	(void)button;  /* button state not used; routing is by coordinate */
+void editorProcessMouse(int x, int y) {
 	editorPane *pane = editorPaneAtCoord(x, y);
 	if (pane) {
 		E.active_pane = pane;
@@ -4251,24 +3990,12 @@ void editorProcessMouse(int button, int x, int y) {
 				int rel_y = y - pane->y;
 				int file_y, file_x;
 				if (E.word_wrap && pane->wrap_lines) {
-					int wrap_width = pane->width - E.line_number_width;
-					if (wrap_width < 1) wrap_width = 1;
-					int target_visual = rel_y + pane->rowoff;
-					int visual = 0;
-					int found = 0;
-					for (int r = 0; r < pane->numrows; r++) {
-						int lines = (pane->row[r].rsize + wrap_width - 1) / wrap_width;
-						if (lines < 1) lines = 1;
-						if (visual + lines > target_visual) {
-							file_y = r;
-							int seg = target_visual - visual;
-							file_x = seg * wrap_width + (x - pane->x - E.line_number_width);
-							found = 1;
-							break;
-						}
-						visual += lines;
-					}
-					if (!found) {
+					int wrap_width = hkWrapWidth(pane);
+					int seg = 0;
+					file_y = hkRowAtVisual(pane, rel_y + pane->rowoff, wrap_width, &seg);
+					if (file_y >= 0) {
+						file_x = seg * wrap_width + (x - pane->x - E.line_number_width);
+					} else {
 						file_y = pane->numrows - 1;
 						file_x = 0;
 					}
@@ -4305,6 +4032,15 @@ void editorHandleScroll(int direction) {
 			pane->ai->scroll_offset -= amount;
 			if (pane->ai->scroll_offset < 0) pane->ai->scroll_offset = 0;
 		}
+		return;
+	}
+
+	if (pane->type == PANE_RUNNER && pane->runner) {
+		runnerData *r = pane->runner;
+		pthread_mutex_lock(&r->lock);
+		if (direction == MOUSE_WHEEL_UP) r->selected = MAX(0, r->selected - amount);
+		else r->selected = MIN(r->count ? r->count - 1 : 0, r->selected + amount);
+		pthread_mutex_unlock(&r->lock);
 		return;
 	}
 
@@ -4358,14 +4094,6 @@ void editorSetMode(enum editorMode mode) {
 	case MODE_VISUAL_LINE:
 		editorSetStatusMessage("-- VISUAL LINE --");
 		cursor_seq = "\x1b[2 q";
-		break;
-	case MODE_AI:
-		editorSetStatusMessage("-- AI --");
-		cursor_seq = "\x1b[6 q";
-		break;
-	case MODE_COMMAND:
-		editorSetStatusMessage("-- COMMAND --");
-		cursor_seq = "\x1b[6 q";
 		break;
 	}
 	if (cursor_seq) write(STDOUT_FILENO, cursor_seq, strlen(cursor_seq));
@@ -4428,12 +4156,8 @@ void editorColonCommand() {
 	}
 
 	if (strcmp(cmd, "q") == 0 || strcmp(cmd, "quit") == 0) {
-		editorPane **leaves = NULL;
-		int lcount = 0;
-		editorCollectLeafPanes(E.root_pane, &leaves, &lcount);
-		int side_count = (E.left_panel ? 1 : 0) + (E.right_panel ? 1 : 0);
-		int total_panes = lcount + side_count;
-		free(leaves);
+		int lcount = hkLeafCount();
+		int total_panes = lcount + (E.left_panel ? 1 : 0) + (E.right_panel ? 1 : 0);
 
 		if (E.active_pane == E.right_panel && E.right_panel) {
 			editorToggleAI();
@@ -4442,6 +4166,11 @@ void editorColonCommand() {
 		}
 		if (E.active_pane == E.left_panel && E.left_panel) {
 			editorToggleExplorer();
+			free(cmd);
+			return;
+		}
+		if (E.active_pane == E.bottom_panel && E.bottom_panel) {
+			hkCloseSidePanel(&E.bottom_panel, NULL);
 			free(cmd);
 			return;
 		}
@@ -4471,12 +4200,8 @@ void editorColonCommand() {
 			exit(0);
 		}
 	} else if (strcmp(cmd, "q!") == 0) {
-		editorPane **leaves = NULL;
-		int lcount = 0;
-		editorCollectLeafPanes(E.root_pane, &leaves, &lcount);
-		int side_count = (E.left_panel ? 1 : 0) + (E.right_panel ? 1 : 0);
-		int total_panes = lcount + side_count;
-		free(leaves);
+		int lcount = hkLeafCount();
+		int total_panes = lcount + (E.left_panel ? 1 : 0) + (E.right_panel ? 1 : 0);
 		if (total_panes > 1 && lcount > 1) {
 			E.force_window_command = 1;
 			if (E.active_pane == E.right_panel && E.right_panel) editorToggleAI();
@@ -4562,16 +4287,22 @@ void editorColonCommand() {
 #endif
 		}
 
-		if (*filename && pane && pane->type == PANE_EDITOR) {
-			for (int i = 0; i < pane->numrows; i++) {
-				editorFreeRow(&pane->row[i]);
+		struct stat est;
+		if (*filename && stat(filename, &est) == 0 && S_ISDIR(est.st_mode)) {
+			if (!E.left_panel) editorToggleExplorer();
+			if (E.left_panel && E.left_panel->type == PANE_EXPLORER && E.left_panel->explorer) {
+				explorerData *ed = E.left_panel->explorer;
+				free(ed->current_dir);
+				ed->current_dir = strdup(filename);
+				ed->selected = 0;
+				ed->scroll_offset = 0;
+				explorerRefresh(E.left_panel);
+				E.active_pane = E.left_panel;
+				E.left_panel->is_focused = 1;
+				editorSetStatusMessage("Explorer: %s", filename);
 			}
-			free(pane->row);
-			pane->row = NULL;
-			pane->numrows = 0;
-			pane->cx = pane->cy = 0;
-			pane->rowoff = pane->coloff = 0;
-
+		} else if (*filename && pane && pane->type == PANE_EDITOR) {
+			hkResetPaneBuffer(pane);
 			editorOpen(filename);
 		} else {
 			editorSetStatusMessage("Usage: :e <filename>");
@@ -4656,6 +4387,18 @@ void editorColonCommand() {
 			editorPopupOpen("Registers", (const char *const *)items, n, 0, 0);
 			for (int i = 0; i < n; i++) free(items[i]);
 		}
+	} else if (cmd[0] == '!') {
+		hkShellPopup(cmd + 1);
+	} else if (strcmp(cmd, "run") == 0 || strncmp(cmd, "run ", 4) == 0) {
+		const char *rc = cmd[3] ? cmd + 4 : "";
+		while (*rc == ' ') rc++;
+		if (*rc) runnerStart(rc);
+		else if (E.run_cmd && *E.run_cmd) runnerStart(E.run_cmd);
+		else editorSetStatusMessage("Usage: :run <cmd> (or set run_cmd in .hakorc)");
+	} else if (strcmp(cmd, "build") == 0 || strcmp(cmd, "make") == 0) {
+		runnerStart(E.build_cmd && *E.build_cmd ? E.build_cmd : "make");
+	} else if (strcmp(cmd, "test") == 0) {
+		runnerStart(E.test_cmd && *E.test_cmd ? E.test_cmd : "make test");
 	} else {
 		editorSetStatusMessage("Unknown command: %s", cmd);
 	}
@@ -4677,6 +4420,10 @@ void editorDrawRows(struct abuf *ab) {
 		editorDrawPane(E.right_panel, ab);
 	}
 
+	if (E.bottom_panel && E.bottom_panel->height > 0) {
+		editorDrawPane(E.bottom_panel, ab);
+	}
+
 	if (E.root_pane) {
 		editorDrawPane(E.root_pane, ab);
 	}
@@ -4685,7 +4432,7 @@ void editorDrawRows(struct abuf *ab) {
 void editorDrawStatusBar(struct abuf *ab) {
 	(void)ab;
 	int gy = E.screenrows;
-	Color sb_bg = E.theme.border;
+	Color sb_bg = E.theme.status_bg;
 	Color sb_fg = E.theme.status_fg;
 
 	for (int i = 0; i < E.screencols; i++) {
@@ -4694,6 +4441,7 @@ void editorDrawStatusBar(struct abuf *ab) {
 
 	editorPane *pane = E.active_pane;
 	char status[80], rstatus[80];
+	int len = 0, rlen = 0;
 
 	if (pane && pane->type == PANE_EDITOR) {
 		const char *display_name = pane->filename;
@@ -4701,47 +4449,40 @@ void editorDrawStatusBar(struct abuf *ab) {
 			const char *slash = strrchr(display_name, '/');
 			if (slash) display_name = slash + 1;
 		}
-		int len = snprintf(status, sizeof(status), " %.20s %s",
+		len = snprintf(status, sizeof(status), " %.20s %s",
 			display_name ? display_name : "[No Name]",
 			pane->dirty ? "[+]" : "");
-		int rlen = snprintf(rstatus, sizeof(rstatus), "%s | %d:%d ",
+		rlen = snprintf(rstatus, sizeof(rstatus), "%s | %d:%d ",
 			pane->syntax ? pane->syntax->filetype : "text",
 			pane->cy + 1, pane->cx + 1);
-		if (len > E.screencols) len = E.screencols;
-		gridPutStr(0, gy, status, len, sb_fg, sb_bg);
-		if (rlen <= E.screencols - len) {
-			gridPutStr(E.screencols - rlen, gy, rstatus, rlen, sb_fg, sb_bg);
-		}
 	} else if (pane && pane->type == PANE_EXPLORER) {
 		explorerData *data = pane->explorer;
-		int len = snprintf(status, sizeof(status), " %s %s: %.60s",
+		len = snprintf(status, sizeof(status), " %s %s: %.60s",
 			E.explorer_kanji, E.explorer_name,
 			data && data->current_dir ? data->current_dir : "/");
-		int selected_info_len = 0;
 		if (data && data->num_entries > 0 && data->selected >= 0 && data->selected < data->num_entries) {
-			selected_info_len = snprintf(rstatus, sizeof(rstatus), "%d/%d ",
+			rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d ",
 				data->selected + 1, data->num_entries);
-		}
-		if (len > E.screencols) len = E.screencols;
-		gridPutStr(0, gy, status, len, sb_fg, sb_bg);
-		if (selected_info_len > 0 && selected_info_len <= E.screencols - len) {
-			gridPutStr(E.screencols - selected_info_len, gy, rstatus, selected_info_len, sb_fg, sb_bg);
 		}
 	} else if (pane && pane->type == PANE_AI) {
 		aiData *data = pane->ai;
-		int len = snprintf(status, sizeof(status), " %s %s: %s",
+		len = snprintf(status, sizeof(status), " %s %s: %s",
 			E.ai_kanji, E.ai_name,
 			data && data->mode == MODE_INSERT ? "Listening..." : "Ready");
-		int history_info_len = 0;
 		if (data && data->history_count > 0) {
-			history_info_len = snprintf(rstatus, sizeof(rstatus), "%d messages ",
-				data->history_count);
+			rlen = snprintf(rstatus, sizeof(rstatus), "%d messages ", data->history_count);
 		}
-		if (len > E.screencols) len = E.screencols;
-		gridPutStr(0, gy, status, len, sb_fg, sb_bg);
-		if (history_info_len > 0 && history_info_len <= E.screencols - len) {
-			gridPutStr(E.screencols - history_info_len, gy, rstatus, history_info_len, sb_fg, sb_bg);
-		}
+	} else if (pane && pane->type == PANE_RUNNER && pane->runner) {
+		runnerData *r = pane->runner;
+		len = snprintf(status, sizeof(status), " \xe2\x96\xb6 %.40s %s", r->cmd,
+			r->running ? "[running]" : "");
+		if (r->count > 0) rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d ", r->selected + 1, r->count);
+	}
+
+	if (len > E.screencols) len = E.screencols;
+	if (len > 0) gridPutStr(0, gy, status, len, sb_fg, sb_bg);
+	if (rlen > 0 && rlen <= E.screencols - len) {
+		gridPutStr(E.screencols - rlen, gy, rstatus, rlen, sb_fg, sb_bg);
 	}
 }
 
@@ -4766,13 +4507,49 @@ void editorDrawMessageBar(struct abuf *ab) {
 		case MODE_INSERT: mode_str = "-- INSERT --"; break;
 		case MODE_VISUAL: mode_str = "-- VISUAL --"; break;
 		case MODE_VISUAL_LINE: mode_str = "-- VISUAL LINE --"; break;
-		case MODE_AI: mode_str = "-- AI --"; break;
-		case MODE_COMMAND: mode_str = "-- COMMAND --"; break;
 		}
 		int mlen = strlen(mode_str);
 		if (mlen > E.screencols) mlen = E.screencols;
 		gridPutStr(0, gy, mode_str, mlen, msg_fg, msg_bg);
 	}
+}
+
+static int aiPromptSegs(aiData *data, int seg_w, int **out_start, int **out_end) {
+	int pmax = 32, n = 0;
+	int *pstart = malloc(sizeof(int) * pmax);
+	int *pend = malloc(sizeof(int) * pmax);
+	if (data->prompt_buffer && data->prompt_len > 0) {
+		int i = 0;
+		while (i <= data->prompt_len) {
+			int line_start = i;
+			while (i < data->prompt_len && data->prompt_buffer[i] != '\n') i++;
+			int line_end = i;
+			int seg = line_start;
+			do {
+				int take = (line_end - seg > seg_w) ? seg_w : (line_end - seg);
+				if (n >= pmax) {
+					pmax *= 2;
+					pstart = realloc(pstart, sizeof(int) * pmax);
+					pend = realloc(pend, sizeof(int) * pmax);
+				}
+				pstart[n] = seg;
+				pend[n] = seg + take;
+				n++;
+				seg += take;
+			} while (seg < line_end);
+			if (line_end == data->prompt_len && (data->prompt_len == 0 || data->prompt_buffer[data->prompt_len - 1] != '\n')) break;
+			i++;
+			if (i == data->prompt_len + 1) break;
+		}
+	}
+	if (n == 0) {
+		pstart[0] = 0;
+		pend[0] = 0;
+		n = 1;
+	}
+	*out_start = pstart;
+	*out_end = pend;
+	return n;
 }
 
 void editorRefreshScreen() {
@@ -4837,16 +4614,9 @@ void editorRefreshScreen() {
 		int cursor_y = pane->y + 1;
 
 		if (E.word_wrap && pane->wrap_lines && pane->cy < pane->numrows) {
-			int wrap_width = pane->width - E.line_number_width;
-			if (wrap_width <= 0) wrap_width = 1;
+			int wrap_width = hkWrapWidth(pane);
 
-			int visual_row = 0;
-			for (int i = 0; i < pane->cy; i++) {
-				int lines = (pane->row[i].rsize + wrap_width - 1) / wrap_width;
-				if (lines < 1) lines = 1;
-				visual_row += lines;
-			}
-
+			int visual_row = hkVisualRowOfLine(pane, pane->cy, wrap_width);
 			int rx = editorRowCxToRx(&pane->row[pane->cy], pane->cx);
 			int line_in_wrap = rx / wrap_width;
 			int col_in_line = rx % wrap_width;
@@ -4881,40 +4651,26 @@ void editorRefreshScreen() {
 		int seg_w = inner_w - 2;
 		if (seg_w < 2) seg_w = 2;
 
-		int vline = 0;
-		int col_in_line = 0;
-		int total_vlines = 0;
+		int *pstart, *pend;
+		int total_vlines = aiPromptSegs(adata, seg_w, &pstart, &pend);
 		int pcur = adata->prompt_cursor;
 		if (pcur < 0) pcur = 0;
 		if (pcur > adata->prompt_len) pcur = adata->prompt_len;
-		if (adata->prompt_buffer && adata->prompt_len > 0) {
-			int i = 0;
-			while (i <= adata->prompt_len) {
-				int line_start = i;
-				while (i < adata->prompt_len && adata->prompt_buffer[i] != '\n') i++;
-				int line_end = i;
-				int seg = line_start;
-				do {
-					int take = (line_end - seg > seg_w) ? seg_w : (line_end - seg);
-					if (pcur >= seg && pcur <= seg + take && pcur <= line_end) {
-						vline = total_vlines;
-						col_in_line = pcur - seg;
-					}
-					total_vlines++;
-					seg += take;
-				} while (seg < line_end);
-				if (line_end == adata->prompt_len && (adata->prompt_len == 0 || adata->prompt_buffer[adata->prompt_len - 1] != '\n')) break;
-				i++;
-				if (i == adata->prompt_len + 1) break;
+		int vline = 0;
+		int col_in_line = 0;
+		for (int s = 0; s < total_vlines; s++) {
+			if (pcur >= pstart[s] && pcur <= pend[s]) {
+				vline = s;
+				col_in_line = pcur - pstart[s];
 			}
-			if (adata->prompt_len > 0 && adata->prompt_buffer[adata->prompt_len - 1] == '\n' && pcur == adata->prompt_len) {
-				vline = total_vlines;
-				col_in_line = 0;
-				total_vlines++;
-			}
-		} else {
-			total_vlines = 1;
 		}
+		if (adata->prompt_len > 0 && adata->prompt_buffer[adata->prompt_len - 1] == '\n' && pcur == adata->prompt_len) {
+			vline = total_vlines;
+			col_in_line = 0;
+			total_vlines++;
+		}
+		free(pstart);
+		free(pend);
 
 		int plines = total_vlines > 5 ? 5 : total_vlines;
 		int pscroll = total_vlines > plines ? total_vlines - plines : 0;
@@ -4994,6 +4750,88 @@ static void hkReplayInsert(void) {
 	}
 }
 
+static void hkYankLinesToReg(editorPane *pane, int n, int is_yank) {
+	if (pane->cy >= pane->numrows) return;
+	int end = pane->cy + n;
+	if (end > pane->numrows) end = pane->numrows;
+	int total = 0;
+	for (int k = pane->cy; k < end; k++) total += pane->row[k].size + 1;
+	char *buf = malloc(total + 1);
+	if (!buf) return;
+	int off = 0;
+	for (int k = pane->cy; k < end; k++) {
+		memcpy(buf + off, pane->row[k].chars, pane->row[k].size);
+		off += pane->row[k].size;
+		buf[off++] = '\n';
+	}
+	buf[off] = '\0';
+	hkSetRegister(E.hk.pending_reg, buf, off, 1, is_yank);
+	free(buf);
+}
+
+static void hkDeleteToEOL(editorPane *pane) {
+	if (pane->cy >= pane->numrows) return;
+	editorSaveState();
+	erow *row = &pane->row[pane->cy];
+	if (pane->cx < row->size) {
+		hkSetRegister(E.hk.pending_reg, &row->chars[pane->cx], row->size - pane->cx, 0, 0);
+		row->size = pane->cx;
+		row->chars[row->size] = '\0';
+		editorUpdateRow(row);
+		pane->dirty++;
+	}
+}
+
+static void hkDeleteWordForward(editorPane *pane) {
+	if (pane->cy >= pane->numrows) return;
+	erow *row = &pane->row[pane->cy];
+	int start = pane->cx;
+	int end = pane->cx;
+	while (end < row->size && !is_separator(row->chars[end])) end++;
+	while (end < row->size && is_separator(row->chars[end]) && row->chars[end] != '\n') end++;
+	if (end > start) {
+		hkSetRegister(E.hk.pending_reg, &row->chars[start], end - start, 0, 0);
+		memmove(&row->chars[start], &row->chars[end], row->size - end + 1);
+		row->size -= (end - start);
+		editorUpdateRow(row);
+		pane->dirty++;
+		if (pane->cx >= row->size && pane->cx > 0) pane->cx = row->size > 0 ? row->size - 1 : 0;
+	}
+}
+
+static void hkJoinLines(editorPane *pane, int n) {
+	for (int k = 0; k < n; k++) {
+		if (pane->cy >= pane->numrows - 1) break;
+		pane->cx = pane->row[pane->cy].size;
+		if (pane->row[pane->cy].size > 0 && pane->row[pane->cy + 1].size > 0) editorInsertChar(' ');
+		editorRowAppendString(&pane->row[pane->cy], pane->row[pane->cy + 1].chars, pane->row[pane->cy + 1].size);
+		editorDelRow(pane->cy + 1);
+	}
+}
+
+static void hkWordForward(editorPane *pane) {
+	if (pane->cy >= pane->numrows) return;
+	erow *row = &pane->row[pane->cy];
+	while (pane->cx < row->size && !is_separator(row->chars[pane->cx])) pane->cx++;
+	while (pane->cx < row->size && is_separator(row->chars[pane->cx])) pane->cx++;
+	if (pane->cx >= row->size && pane->cy < pane->numrows - 1) {
+		pane->cy++;
+		pane->cx = 0;
+	}
+}
+
+static void hkWordBack(editorPane *pane) {
+	if (pane->cx == 0 && pane->cy == 0) return;
+	if (pane->cx == 0 && pane->cy > 0) {
+		pane->cy--;
+		pane->cx = pane->row[pane->cy].size;
+		return;
+	}
+	erow *row = &pane->row[pane->cy];
+	while (pane->cx > 0 && is_separator(row->chars[pane->cx - 1])) pane->cx--;
+	while (pane->cx > 0 && !is_separator(row->chars[pane->cx - 1])) pane->cx--;
+}
+
 static void hkDotRepeat(void) {
 	editorPane *pane = E.active_pane;
 	if (!pane || pane->type != PANE_EDITOR) return;
@@ -5043,30 +4881,12 @@ static void hkDotRepeat(void) {
 		pane->cx = 0;
 		break;
 	case 'J':
-		for (int k = 0; k < n; k++) {
-			if (pane->cy < pane->numrows - 1) {
-				pane->cx = pane->row[pane->cy].size;
-				if (pane->row[pane->cy].size > 0 && pane->row[pane->cy + 1].size > 0) editorInsertChar(' ');
-				editorRowAppendString(&pane->row[pane->cy], pane->row[pane->cy + 1].chars, pane->row[pane->cy + 1].size);
-				editorDelRow(pane->cy + 1);
-			}
-		}
+		hkJoinLines(pane, n);
 		break;
 	case 'w':
 	case 'W':
 		if (pane->cy < pane->numrows) {
-			erow *row = &pane->row[pane->cy];
-			int start = pane->cx;
-			int end = pane->cx;
-			while (end < row->size && !is_separator(row->chars[end])) end++;
-			while (end < row->size && is_separator(row->chars[end]) && row->chars[end] != '\n') end++;
-			if (end > start) {
-				memmove(&row->chars[start], &row->chars[end], row->size - end + 1);
-				row->size -= (end - start);
-				editorUpdateRow(row);
-				pane->dirty++;
-				if (pane->cx >= row->size && pane->cx > 0) pane->cx = row->size > 0 ? row->size - 1 : 0;
-			}
+			hkDeleteWordForward(pane);
 			if (E.hk.last_op == 'W') hkReplayInsert();
 		}
 		break;
@@ -5214,7 +5034,6 @@ void editorProcessKeyPress() {
 		}
 
 		E.splash_active = 0;
-		E.splash_dismissed = 1;
 		editorSetStatusMessage(":h = help | :w = write | :q = quit | / = find | ^W = window | :rei/:ai = agent");
 		return;
 	}
@@ -5234,7 +5053,7 @@ void editorProcessKeyPress() {
 	}
 
 	if (c == MOUSE_CLICK) {
-		editorProcessMouse(0, E.mouse_x, E.mouse_y);
+		editorProcessMouse(E.mouse_x, E.mouse_y);
 		if (E.mode == MODE_INSERT) editorSetMode(MODE_INSERT);
 		return;
 	}
@@ -5310,6 +5129,11 @@ void editorProcessKeyPress() {
 
 	if (pane && pane->type == PANE_EXPLORER) {
 		explorerHandleKey(pane, c);
+		return;
+	}
+
+	if (pane && pane->type == PANE_RUNNER) {
+		runnerHandleKey(pane, c);
 		return;
 	}
 
@@ -5447,7 +5271,6 @@ void editorProcessKeyPress() {
 			E.search.query = malloc(wlen + 1);
 			memcpy(E.search.query, &row->chars[s], wlen);
 			E.search.query[wlen] = '\0';
-			E.search.direction = (c == '*') ? 1 : -1;
 			hkPushJump(pane->cx, pane->cy);
 			if (c == '*') editorFindNext(); else editorFindPrev();
 			last_char = 0; g_pressed = 0;
@@ -5598,34 +5421,14 @@ void editorProcessKeyPress() {
 		}
 
 		case 'D':
-			if (pane->cy < pane->numrows) {
-				editorSaveState();
-				erow *row = &pane->row[pane->cy];
-				if (pane->cx < row->size) {
-					hkSetRegister(E.hk.pending_reg, &row->chars[pane->cx], row->size - pane->cx, 0, 0);
-					row->size = pane->cx;
-					row->chars[row->size] = '\0';
-					editorUpdateRow(row);
-					pane->dirty++;
-				}
-			}
+			hkDeleteToEOL(pane);
 			E.hk.pending_reg = 0;
 			last_char = 0;
 			g_pressed = 0;
 			break;
 
 		case 'C':
-			if (pane->cy < pane->numrows) {
-				editorSaveState();
-				erow *row = &pane->row[pane->cy];
-				if (pane->cx < row->size) {
-					hkSetRegister(E.hk.pending_reg, &row->chars[pane->cx], row->size - pane->cx, 0, 0);
-					row->size = pane->cx;
-					row->chars[row->size] = '\0';
-					editorUpdateRow(row);
-					pane->dirty++;
-				}
-			}
+			hkDeleteToEOL(pane);
 			E.hk.pending_reg = 0;
 			editorSetMode(MODE_INSERT);
 			break;
@@ -5720,21 +5523,9 @@ void editorProcessKeyPress() {
 			if (last_char == 'y') {
 				int n = hkConsumeCount();
 				if (pane->cy < pane->numrows) {
-					int end = pane->cy + n;
-					if (end > pane->numrows) end = pane->numrows;
-					int total = 0;
-					for (int k = pane->cy; k < end; k++) total += pane->row[k].size + 1;
-					char *buf = malloc(total + 1);
-					int off = 0;
-					for (int k = pane->cy; k < end; k++) {
-						memcpy(buf + off, pane->row[k].chars, pane->row[k].size);
-						off += pane->row[k].size;
-						buf[off++] = '\n';
-					}
-					buf[off] = '\0';
-					hkSetRegister(E.hk.pending_reg, buf, off, 1, 1);
-					free(buf);
-					editorSetStatusMessage("%d line%s yanked", end - pane->cy, (end - pane->cy) == 1 ? "" : "s");
+					int lines = MIN(n, pane->numrows - pane->cy);
+					hkYankLinesToReg(pane, n, 1);
+					editorSetStatusMessage("%d line%s yanked", lines, lines == 1 ? "" : "s");
 				}
 				E.hk.pending_reg = 0;
 				last_char = 0;
@@ -5763,16 +5554,7 @@ void editorProcessKeyPress() {
 			int n = hkConsumeCount();
 			E.hk.last_op = 'J'; E.hk.last_count = n;
 			editorSaveState();
-			for (int k = 0; k < n; k++) {
-				if (pane->cy < pane->numrows - 1) {
-					pane->cx = pane->row[pane->cy].size;
-					if (pane->row[pane->cy].size > 0 && pane->row[pane->cy + 1].size > 0) {
-						editorInsertChar(' ');
-					}
-					editorRowAppendString(&pane->row[pane->cy], pane->row[pane->cy + 1].chars, pane->row[pane->cy + 1].size);
-					editorDelRow(pane->cy + 1);
-				}
-			}
+			hkJoinLines(pane, n);
 			last_char = 0; g_pressed = 0;
 			break;
 		}
@@ -5782,19 +5564,7 @@ void editorProcessKeyPress() {
 				int was_change = (last_char == 'c');
 				editorSaveState();
 				if (pane->cy < pane->numrows) {
-					erow *row = &pane->row[pane->cy];
-					int start = pane->cx;
-					int end = pane->cx;
-					while (end < row->size && !is_separator(row->chars[end])) end++;
-					while (end < row->size && is_separator(row->chars[end]) && row->chars[end] != '\n') end++;
-					if (end > start) {
-						hkSetRegister(E.hk.pending_reg, &row->chars[start], end - start, 0, 0);
-						memmove(&row->chars[start], &row->chars[end], row->size - end + 1);
-						row->size -= (end - start);
-						editorUpdateRow(row);
-						pane->dirty++;
-						if (pane->cx >= row->size && pane->cx > 0) pane->cx = row->size > 0 ? row->size - 1 : 0;
-					}
+					hkDeleteWordForward(pane);
 					if (was_change) {
 						hkRecordStart('W', 1);
 						editorSetMode(MODE_INSERT);
@@ -5811,16 +5581,7 @@ void editorProcessKeyPress() {
 			}
 			{
 				int n = hkConsumeCount();
-				for (int k = 0; k < n; k++) {
-					if (pane->cy >= pane->numrows) break;
-					erow *row = &pane->row[pane->cy];
-					while (pane->cx < row->size && !is_separator(row->chars[pane->cx])) pane->cx++;
-					while (pane->cx < row->size && is_separator(row->chars[pane->cx])) pane->cx++;
-					if (pane->cx >= row->size && pane->cy < pane->numrows - 1) {
-						pane->cy++;
-						pane->cx = 0;
-					}
-				}
+				for (int k = 0; k < n; k++) hkWordForward(pane);
 			}
 			last_char = 0;
 			g_pressed = 0;
@@ -5828,19 +5589,17 @@ void editorProcessKeyPress() {
 
 		case 'b': {
 			int n = hkConsumeCount();
-			for (int k = 0; k < n; k++) {
-				if (pane->cx == 0 && pane->cy == 0) break;
-				if (pane->cx == 0 && pane->cy > 0) {
-					pane->cy--;
-					pane->cx = pane->row[pane->cy].size;
-				} else {
-					erow *row = &pane->row[pane->cy];
-					while (pane->cx > 0 && is_separator(row->chars[pane->cx - 1])) pane->cx--;
-					while (pane->cx > 0 && !is_separator(row->chars[pane->cx - 1])) pane->cx--;
-				}
-			}
+			for (int k = 0; k < n; k++) hkWordBack(pane);
 			last_char = 0;
 			g_pressed = 0;
+			break;
+		}
+
+		case ']':
+		case '[': {
+			int k2 = hkReadKeyBlocking();
+			if (k2 == 'e') runnerErrorStep(c == ']' ? 1 : -1);
+			last_char = 0; g_pressed = 0;
 			break;
 		}
 
@@ -5947,15 +5706,7 @@ void editorProcessKeyPress() {
 			if (E.search.query) {
 				free(E.search.query);
 				E.search.query = NULL;
-				for (int i = 0; i < pane->numrows; i++) {
-					erow *row = &pane->row[i];
-					for (int j = 0; j < row->rsize; j++) {
-						if (row->hl[j] == HL_MATCH) {
-							row->hl[j] = HL_NORMAL;
-						}
-					}
-					editorUpdateSyntax(row);
-				}
+				hkRefreshSyntax(pane);
 				editorSetStatusMessage("Search cleared");
 			}
 			E.hk.pending_count = 0;
@@ -5985,22 +5736,8 @@ void editorProcessKeyPress() {
 				editorSaveState();
 
 				if (pane->cy < pane->numrows) {
-					int end = pane->cy + n;
-					if (end > pane->numrows) end = pane->numrows;
-					int total = 0;
-					for (int k = pane->cy; k < end; k++) total += pane->row[k].size + 1;
-					char *buf = malloc(total + 1);
-					int off = 0;
-					for (int k = pane->cy; k < end; k++) {
-						memcpy(buf + off, pane->row[k].chars, pane->row[k].size);
-						off += pane->row[k].size;
-						buf[off++] = '\n';
-					}
-					buf[off] = '\0';
-					hkSetRegister(E.hk.pending_reg, buf, off, 1, 0);
-					free(buf);
-
-					int to_del = end - pane->cy;
+					int to_del = MIN(n, pane->numrows - pane->cy);
+					hkYankLinesToReg(pane, n, 0);
 					for (int k = 0; k < to_del; k++) editorDelRow(pane->cy);
 				}
 				E.hk.pending_reg = 0;
@@ -6052,30 +5789,15 @@ void editorProcessKeyPress() {
 		case CTRL_KEY('f'):
 		case PAGE_DOWN:
 			if (E.word_wrap && pane->wrap_lines) {
-				int wrap_width = pane->width - E.line_number_width;
-				if (wrap_width < 1) wrap_width = 1;
-				
-				int visual_rows = 0;
-				for (int i = 0; i < pane->numrows; i++) {
-					int lines = (pane->row[i].rsize + wrap_width - 1) / wrap_width;
-					if (lines < 1) lines = 1;
-					visual_rows += lines;
-				}
-				
+				int wrap_width = hkWrapWidth(pane);
+				int visual_rows = hkVisualRowOfLine(pane, pane->numrows, wrap_width);
 				int old_rowoff = pane->rowoff;
 				pane->rowoff = MIN(pane->rowoff + pane->height, MAX(0, visual_rows - pane->height));
-				
 				if (pane->rowoff != old_rowoff) {
-					int current_visual = 0;
-					for (int i = 0; i < pane->numrows; i++) {
-						int lines = (pane->row[i].rsize + wrap_width - 1) / wrap_width;
-						if (lines < 1) lines = 1;
-						if (current_visual + lines > pane->rowoff) {
-							pane->cy = i;
-							pane->cx = 0;
-							break;
-						}
-						current_visual += lines;
+					int r = hkRowAtVisual(pane, pane->rowoff, wrap_width, NULL);
+					if (r >= 0) {
+						pane->cy = r;
+						pane->cx = 0;
 					}
 				}
 			} else {
@@ -6092,21 +5814,12 @@ void editorProcessKeyPress() {
 			if (E.word_wrap && pane->wrap_lines) {
 				int old_rowoff = pane->rowoff;
 				pane->rowoff = MAX(0, pane->rowoff - pane->height);
-				
 				if (pane->rowoff != old_rowoff) {
-					int wrap_width = pane->width - E.line_number_width;
-					if (wrap_width < 1) wrap_width = 1;
-					
-					int current_visual = 0;
-					for (int i = 0; i < pane->numrows; i++) {
-						int lines = (pane->row[i].rsize + wrap_width - 1) / wrap_width;
-						if (lines < 1) lines = 1;
-						if (current_visual + lines > pane->rowoff + pane->height - 1) {
-							pane->cy = i;
-							pane->cx = 0;
-							break;
-						}
-						current_visual += lines;
+					int wrap_width = hkWrapWidth(pane);
+					int r = hkRowAtVisual(pane, pane->rowoff + pane->height - 1, wrap_width, NULL);
+					if (r >= 0) {
+						pane->cy = r;
+						pane->cx = 0;
 					}
 				}
 			} else {
@@ -6224,28 +5937,11 @@ void editorProcessKeyPress() {
 			break;
 
 		case 'w':
-			if (pane->cy < pane->numrows) {
-				erow *row = &pane->row[pane->cy];
-				while (pane->cx < row->size && !is_separator(row->chars[pane->cx])) pane->cx++;
-				while (pane->cx < row->size && is_separator(row->chars[pane->cx])) pane->cx++;
-				if (pane->cx >= row->size && pane->cy < pane->numrows - 1) {
-					pane->cy++;
-					pane->cx = 0;
-				}
-			}
+			hkWordForward(pane);
 			break;
 
 		case 'b':
-			if (pane->cx > 0 || pane->cy > 0) {
-				if (pane->cx == 0 && pane->cy > 0) {
-					pane->cy--;
-					pane->cx = pane->row[pane->cy].size;
-				} else {
-					erow *row = &pane->row[pane->cy];
-					while (pane->cx > 0 && is_separator(row->chars[pane->cx - 1])) pane->cx--;
-					while (pane->cx > 0 && !is_separator(row->chars[pane->cx - 1])) pane->cx--;
-				}
-			}
+			hkWordBack(pane);
 			break;
 
 		case 'G':
@@ -6318,7 +6014,7 @@ void editorProcessKeyPress() {
 static const char *const HK_THEME_NAMES[] = {
 	"mithraeum", "dark", "light", "gruvbox", "nord", "dracula", "monokai",
 	"solarized", "tokyonight", "catppuccin", "onedark", "material",
-	"everforest", "rosepine", "ayu", "kanagawa"
+	"everforest", "rosepine", "github-dark", "github-light", "ayu", "kanagawa"
 };
 #define HK_THEME_COUNT ((int)(sizeof(HK_THEME_NAMES)/sizeof(HK_THEME_NAMES[0])))
 
@@ -6525,8 +6221,8 @@ void editorDrawPopup() {
 	int x0, y0, boxw, boxh, inner, body;
 	hkPopupGeom(&x0, &y0, &boxw, &boxh, &inner, &body);
 
-	Color bd = E.theme.border, bg = E.theme.status_bg, fg = E.theme.fg;
-	Color tfg = E.theme.status_fg, dim = E.theme.line_number;
+	Color bd = E.theme.border, bg = E.theme.bg, fg = E.theme.fg;
+	Color tfg = E.theme.fg, dim = E.theme.line_number;
 	Color sel_fg = E.theme.visual_fg, sel_bg = E.theme.visual_bg;
 
 	char line[512];
@@ -6577,6 +6273,31 @@ void editorDrawPopup() {
 }
 
 /*** splash screen ***/
+static void splashPut(struct abuf *ab, int row, int col, const char *s, Color fg) {
+	char buf[32];
+	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", row, col + 1);
+	abAppend(ab, buf, strlen(buf));
+	setThemeBgColor(ab, E.theme.bg);
+	setThemeColor(ab, fg);
+	abAppend(ab, s, strlen(s));
+}
+
+static void splashPutCentered(struct abuf *ab, int row, const char *s, Color fg) {
+	int col = (E.screencols - (int)strlen(s)) / 2;
+	if (col < 0) col = 0;
+	splashPut(ab, row, col, s, fg);
+}
+
+static void splashBullet(struct abuf *ab, int row, const char *text, Color bullet, Color body) {
+	char line[160];
+	snprintf(line, sizeof(line), "\xc2\xb7 %s", text);
+	int col = (E.screencols - (int)strlen(line)) / 2;
+	if (col < 0) col = 0;
+	splashPut(ab, row, col, "\xc2\xb7", bullet);
+	setThemeColor(ab, body);
+	abAppend(ab, line + 2, strlen(line) - 2);
+}
+
 void editorDrawSplash() {
 	struct abuf ab = ABUF_INIT;
 
@@ -6597,13 +6318,9 @@ void editorDrawSplash() {
 	}
 
 	int center_y = (E.screenrows + 2) / 2 - 6;
-	int center_x = E.screencols / 2;
-
 	if (center_y < 1) center_y = 1;
 
-	char buf[64];
-
-	const char *logo[] = {
+	static const char *logo[] = {
 		"██╗  ██╗ █████╗ ██╗  ██╗ ██████╗",
 		"██║  ██║██╔══██╗██║ ██╔╝██╔═══██╗",
 		"███████║███████║█████╔╝ ██║   ██║",
@@ -6611,66 +6328,20 @@ void editorDrawSplash() {
 		"██║  ██║██║  ██║██║  ██╗╚██████╔╝",
 		"╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝"
 	};
-
-	int logo_width = 34;
-	int logo_start = center_y;
-
-	Color logo_color = E.theme.border;
-
+	int logo_x = E.screencols / 2 - 17;
+	if (logo_x < 0) logo_x = 0;
 	for (int i = 0; i < 6; i++) {
-		int x_pos = center_x - logo_width / 2;
-		if (x_pos < 0) x_pos = 0;
-
-		snprintf(buf, sizeof(buf), "\x1b[%d;%dH", logo_start + i, x_pos + 1);
-		abAppend(&ab, buf, strlen(buf));
-
-		setThemeBgColor(&ab, E.theme.bg);
-		setThemeColor(&ab, logo_color);
-		abAppend(&ab, logo[i], strlen(logo[i]));
+		splashPut(&ab, center_y + i, logo_x, logo[i], E.theme.border);
 	}
 
-	const char *kanji = "箱";
-	int kanji_col = (E.screencols - 3) / 2;
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", center_y + 7, kanji_col + 1);
-	abAppend(&ab, buf, strlen(buf));
-
-	setThemeBgColor(&ab, E.theme.bg);
-	Color kanji_color = E.theme.border;
-	setThemeColor(&ab, kanji_color);
-	abAppend(&ab, kanji, strlen(kanji));
-
-	/* EDIT subtitle — regular letters under the kanji, above the version line.
-	   Part of the hako-edit (hake) rebrand in v0.1.3. */
-	const char *edit_label = "EDIT";
-	int edit_col = (E.screencols - (int)strlen(edit_label)) / 2;
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", center_y + 8, edit_col + 1);
-	abAppend(&ab, buf, strlen(buf));
-	setThemeBgColor(&ab, E.theme.bg);
-	setThemeColor(&ab, E.theme.border);
-	abAppend(&ab, edit_label, strlen(edit_label));
+	splashPut(&ab, center_y + 7, (E.screencols - 3) / 2, "箱", E.theme.border);
+	splashPutCentered(&ab, center_y + 8, "EDIT", E.theme.border);
 
 	char version[80];
 	snprintf(version, sizeof(version), "HAKE v%s", HAKE_VERSION);
-	int ver_col = (E.screencols - strlen(version)) / 2;
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", center_y + 9, ver_col + 1);
-	abAppend(&ab, buf, strlen(buf));
+	splashPutCentered(&ab, center_y + 9, version, (Color){130, 130, 130});
+	splashPutCentered(&ab, center_y + 10, "minimal text editor", (Color){100, 100, 100});
 
-	setThemeBgColor(&ab, E.theme.bg);
-	Color version_color = {130, 130, 130};
-	setThemeColor(&ab, version_color);
-	abAppend(&ab, version, strlen(version));
-
-	const char *subtitle = "minimal text editor";
-	int sub_col = (E.screencols - strlen(subtitle)) / 2;
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", center_y + 10, sub_col + 1);
-	abAppend(&ab, buf, strlen(buf));
-
-	setThemeBgColor(&ab, E.theme.bg);
-	Color subtitle_color = {100, 100, 100};
-	setThemeColor(&ab, subtitle_color);
-	abAppend(&ab, subtitle, strlen(subtitle));
-
-	/* # NEW + # TIPS — only render if screen has the vertical room. */
 	if (E.screenrows >= center_y + 20) {
 		static const char *HK_NEW[] = {
 			"Windows build link fix (detectTerminalType)",
@@ -6689,78 +6360,41 @@ void editorDrawSplash() {
 		};
 
 		Color label_color = {180, 180, 180};
-		Color bullet_color = E.theme.border;
 		Color body_color = {130, 130, 130};
 
-		const char *new_label = "# NEW";
-		int nl_col = (E.screencols - (int)strlen(new_label)) / 2;
-		snprintf(buf, sizeof(buf), "\x1b[%d;%dH", center_y + 12, nl_col + 1);
-		abAppend(&ab, buf, strlen(buf));
-		setThemeBgColor(&ab, E.theme.bg);
-		setThemeColor(&ab, label_color);
-		abAppend(&ab, new_label, strlen(new_label));
-
+		splashPutCentered(&ab, center_y + 12, "# NEW", label_color);
 		for (int i = 0; i < 2 && HK_NEW[i]; i++) {
-			char line[160];
-			snprintf(line, sizeof(line), "· %s", HK_NEW[i]);
-			int col = (E.screencols - (int)strlen(line)) / 2;
-			snprintf(buf, sizeof(buf), "\x1b[%d;%dH", center_y + 13 + i, col + 1);
-			abAppend(&ab, buf, strlen(buf));
-			setThemeBgColor(&ab, E.theme.bg);
-			setThemeColor(&ab, bullet_color);
-			abAppend(&ab, "·", strlen("·"));
-			setThemeColor(&ab, body_color);
-			abAppend(&ab, line + strlen("·"), strlen(line) - strlen("·"));
+			splashBullet(&ab, center_y + 13 + i, HK_NEW[i], E.theme.border, body_color);
 		}
 
-		/* Rotate tips by day-of-year so the splash refreshes daily. */
-		int total = 0; while (HK_TIPS[total]) total++;
+		int total = 0;
+		while (HK_TIPS[total]) total++;
 		time_t now = time(NULL);
 		struct tm *tm = localtime(&now);
 		int seed = tm ? tm->tm_yday : 0;
-		int t0 = total ? (seed % total) : 0;
-		int t1 = total ? ((seed + 1) % total) : 0;
 
-		const char *tip_label = "# TIPS";
-		int tl_col = (E.screencols - (int)strlen(tip_label)) / 2;
-		snprintf(buf, sizeof(buf), "\x1b[%d;%dH", center_y + 16, tl_col + 1);
-		abAppend(&ab, buf, strlen(buf));
-		setThemeBgColor(&ab, E.theme.bg);
-		setThemeColor(&ab, label_color);
-		abAppend(&ab, tip_label, strlen(tip_label));
-
-		int pick[2] = {t0, t1};
+		splashPutCentered(&ab, center_y + 16, "# TIPS", label_color);
 		for (int i = 0; i < 2; i++) {
-			char line[160];
-			snprintf(line, sizeof(line), "· %s", HK_TIPS[pick[i]]);
-			int col = (E.screencols - (int)strlen(line)) / 2;
-			snprintf(buf, sizeof(buf), "\x1b[%d;%dH", center_y + 17 + i, col + 1);
-			abAppend(&ab, buf, strlen(buf));
-			setThemeBgColor(&ab, E.theme.bg);
-			setThemeColor(&ab, bullet_color);
-			abAppend(&ab, "·", strlen("·"));
-			setThemeColor(&ab, body_color);
-			abAppend(&ab, line + strlen("·"), strlen(line) - strlen("·"));
+			splashBullet(&ab, center_y + 17 + i, HK_TIPS[total ? (seed + i) % total : 0],
+				E.theme.border, body_color);
 		}
 	}
 
 	const char *instruction = "Press any key to start";
-	int instr_col = (E.screencols - strlen(instruction)) / 2;
+	int instr_col = (E.screencols - (int)strlen(instruction)) / 2;
+	char buf[32];
 	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.screenrows, instr_col + 1);
 	abAppend(&ab, buf, strlen(buf));
-
 	setThemeBgColor(&ab, E.theme.bg);
-	Color dim_color = {80, 80, 80};
-	setThemeColor(&ab, dim_color);
+	setThemeColor(&ab, (Color){80, 80, 80});
 	abAppend(&ab, "\x1b[5m", 4);
 	abAppend(&ab, instruction, strlen(instruction));
 	abAppend(&ab, "\x1b[25m", 5);
-
 	abAppend(&ab, "\x1b[0m", 4);
-	
+
 	snprintf(buf, sizeof(buf), "\x1b[%d;1H", E.screenrows + 2);
 	abAppend(&ab, buf, strlen(buf));
-	
+
 	write(STDOUT_FILENO, ab.b, ab.len);
 	abFree(&ab);
 }
@@ -6782,10 +6416,6 @@ void explorerInit(editorPane *pane) {
 	if (!data) return;
 
 	data->current_dir = getcwd(NULL, 0);
-	data->selected = 0;
-	data->scroll_offset = 0;
-	data->entries = NULL;
-	data->num_entries = 0;
 	pane->explorer = data;
 	
 	explorerRefresh(pane);
@@ -6914,6 +6544,30 @@ void explorerRender(editorPane *pane, struct abuf *ab) {
 	}
 }
 
+static int explorerOpenInSplit(const char *full_path) {
+	editorPane *target = hkFirstEditorLeaf();
+	if (!target) {
+		editorSetStatusMessage("No editor pane available");
+		return 0;
+	}
+	if (target->width < 40) return -1;
+
+	int prev_num_panes = E.num_panes;
+	E.active_pane = target;
+	editorSplitPane(1);
+	if (E.num_panes == prev_num_panes) return 0;
+
+	editorPane *np = E.active_pane;
+	hkResetPaneBuffer(np);
+	free(np->filename);
+	np->filename = NULL;
+	np->dirty = 0;
+
+	editorOpen((char *)full_path);
+	editorSetStatusMessage("Opened in new pane: %s", full_path);
+	return 1;
+}
+
 void explorerHandleKey(editorPane *pane, int key) {
 	explorerData *data = pane->explorer;
 	if (!data) return;
@@ -6977,31 +6631,13 @@ void explorerHandleKey(editorPane *pane, int key) {
 					explorerRefresh(pane);
 				}
 			} else {
-				editorPane *target = NULL;
-				editorPane **panes = NULL;
-				int count = 0;
-				editorCollectLeafPanes(E.root_pane, &panes, &count);
-				
-				for (int i = 0; i < count; i++) {
-					if (panes[i] && panes[i]->type == PANE_EDITOR) {
-						target = panes[i];
-						break;
-					}
-				}
-				free(panes);
-				
-				if (target) {
+				editorPane *target = hkFirstEditorLeaf();
+				if (target && target->dirty) {
+					if (explorerOpenInSplit(full_path) == -1)
+						editorSetStatusMessage("Unsaved changes and no room to split — :w first or force with 'o'");
+				} else if (target) {
 					E.active_pane = target;
-					
-					for (int i = 0; i < target->numrows; i++) {
-						editorFreeRow(&target->row[i]);
-					}
-					free(target->row);
-					target->row = NULL;
-					target->numrows = 0;
-					target->cx = target->cy = 0;
-					target->rowoff = target->coloff = 0;
-					
+					hkResetPaneBuffer(target);
 					editorOpen(full_path);
 					editorSetStatusMessage("Opened: %s", full_path);
 				}
@@ -7033,43 +6669,8 @@ void explorerHandleKey(editorPane *pane, int key) {
 			char full_path[PATH_MAX];
 			snprintf(full_path, sizeof(full_path), "%s/%s", data->current_dir, data->entries[data->selected]);
 
-			editorPane *target = NULL;
-			editorPane **panes = NULL;
-			int count = 0;
-			editorCollectLeafPanes(E.root_pane, &panes, &count);
-			for (int i = 0; i < count; i++) {
-				if (panes[i] && panes[i]->type == PANE_EDITOR) { target = panes[i]; break; }
-			}
-			free(panes);
-			if (!target) {
-				editorSetStatusMessage("No editor pane available");
-				break;
-			}
-
-			if (target->width < 40) {
+			if (explorerOpenInSplit(full_path) == -1)
 				editorSetStatusMessage("Not enough room to split — use <Enter> to open in current pane");
-				break;
-			}
-
-			int prev_num_panes = E.num_panes;
-			E.active_pane = target;
-			editorSplitPane(1);
-			if (E.num_panes == prev_num_panes) {
-				break;
-			}
-
-			editorPane *np = E.active_pane;
-			for (int i = 0; i < np->numrows; i++) editorFreeRow(&np->row[i]);
-			free(np->row);
-			np->row = NULL;
-			np->numrows = 0;
-			np->cx = np->cy = np->rowoff = np->coloff = 0;
-			free(np->filename);
-			np->filename = NULL;
-			np->dirty = 0;
-
-			editorOpen(full_path);
-			editorSetStatusMessage("Opened in new pane: %s", full_path);
 		}
 		break;
 
@@ -7104,27 +6705,30 @@ void explorerCleanup(editorPane *pane) {
 	pane->explorer = NULL;
 }
 
+static void hkCloseSidePanel(editorPane **panel, editorPane *fallback) {
+	if (E.active_pane == *panel) {
+		editorPane **leaves = NULL;
+		int lcount = 0;
+		editorCollectLeafPanes(E.root_pane, &leaves, &lcount);
+		if (lcount > 0) {
+			E.active_pane = leaves[0];
+			E.active_pane->is_focused = 1;
+		} else if (fallback) {
+			E.active_pane = fallback;
+			E.active_pane->is_focused = 1;
+		} else {
+			E.active_pane = NULL;
+		}
+		free(leaves);
+	}
+	editorFreePane(*panel);
+	*panel = NULL;
+	editorResizePanes();
+}
+
 void editorToggleExplorer() {
 	if (E.left_panel && E.left_panel->type == PANE_EXPLORER) {
-		if (E.active_pane == E.left_panel) {
-			editorPane **leaves = NULL;
-			int lcount = 0;
-			editorCollectLeafPanes(E.root_pane, &leaves, &lcount);
-			if (lcount > 0) {
-				E.active_pane = leaves[0];
-				E.active_pane->is_focused = 1;
-			} else if (E.right_panel) {
-				E.active_pane = E.right_panel;
-				E.active_pane->is_focused = 1;
-			} else {
-				E.active_pane = NULL;
-			}
-			free(leaves);
-		}
-		editorFreePane(E.left_panel);
-		E.left_panel = NULL;
-
-		editorResizePanes();
+		hkCloseSidePanel(&E.left_panel, E.right_panel);
 		return;
 	}
 	
@@ -7143,21 +6747,424 @@ void editorToggleExplorer() {
 	editorSetStatusMessage("Explorer opened");
 }
 
+/*** runner ***/
+#define RUNNER_MAX_LINES 5000
+
+static int runnerParseError(const char *line, char *path, size_t psz, int *lno, int *col) {
+	const char *c = strchr(line, ':');
+	while (c) {
+		if (isdigit((unsigned char)c[1])) {
+			int n = (int)(c - line);
+			if (n > 0 && n < (int)psz) {
+				memcpy(path, line, n);
+				path[n] = '\0';
+				if (access(path, F_OK) == 0) {
+					int l = atoi(c + 1);
+					const char *c2 = strchr(c + 1, ':');
+					int cl = (c2 && isdigit((unsigned char)c2[1])) ? atoi(c2 + 1) : 0;
+					if (l > 0) {
+						*lno = l;
+						*col = cl;
+						return 1;
+					}
+				}
+			}
+		}
+		c = strchr(c + 1, ':');
+	}
+	return 0;
+}
+
+static void runnerJumpTo(const char *path, int lno, int col) {
+	editorPane *target = hkFirstEditorLeaf();
+	if (!target) return;
+	char resolved[PATH_MAX];
+	const char *open_path = realpath(path, resolved) ? resolved : path;
+	if (!target->filename || strcmp(target->filename, open_path) != 0) {
+		if (target->dirty) {
+			if (explorerOpenInSplit(open_path) != 1) {
+				editorSetStatusMessage("Unsaved changes and no room to split — :w first");
+				return;
+			}
+			target = E.active_pane;
+		} else {
+			E.active_pane = target;
+			hkResetPaneBuffer(target);
+			editorOpen((char *)open_path);
+		}
+	}
+	E.active_pane = target;
+	target->is_focused = 1;
+	hkPushJump(target->cx, target->cy);
+	target->cy = lno - 1;
+	target->cx = col > 0 ? col - 1 : 0;
+	hkClampCursor(target);
+	target->rowoff = target->cy > 5 ? target->cy - 5 : 0;
+	target->coloff = 0;
+}
+
+static void runnerAppend(runnerData *r, const char *line) {
+	pthread_mutex_lock(&r->lock);
+	if (r->count >= RUNNER_MAX_LINES) {
+		if (!r->truncated) {
+			r->truncated = 1;
+			if (r->count < r->cap) r->lines[r->count++] = strdup("… output truncated");
+		}
+		pthread_mutex_unlock(&r->lock);
+		return;
+	}
+	if (r->count >= r->cap) {
+		r->cap = r->cap ? r->cap * 2 : 128;
+		r->lines = realloc(r->lines, r->cap * sizeof(char *));
+	}
+	int follow = (r->count == 0 || r->selected == r->count - 1);
+	r->lines[r->count++] = strdup(line);
+	if (follow) r->selected = r->count - 1;
+	pthread_mutex_unlock(&r->lock);
+}
+
+#ifndef _WIN32
+static void *runnerThread(void *arg) {
+	runnerData *r = (runnerData *)arg;
+	char line[4096];
+	while (r->fp && fgets(line, sizeof(line), r->fp)) {
+		line[strcspn(line, "\r\n")] = '\0';
+		runnerAppend(r, line);
+		E.full_redraw_pending = 1;
+	}
+	int st = 0;
+	waitpid(r->pid, &st, 0);
+	pthread_mutex_lock(&r->lock);
+	r->running = 0;
+	r->exit_code = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+	pthread_mutex_unlock(&r->lock);
+	E.full_redraw_pending = 1;
+	return NULL;
+}
+#endif
+
+static void runnerStop(runnerData *r) {
+#ifndef _WIN32
+	pthread_mutex_lock(&r->lock);
+	int running = r->running;
+	pid_t pid = r->pid;
+	pthread_mutex_unlock(&r->lock);
+	if (running && pid > 0) kill(pid, SIGTERM);
+	if (r->thread_valid) {
+		pthread_join(r->thread, NULL);
+		r->thread_valid = 0;
+	}
+	if (r->fp) {
+		fclose(r->fp);
+		r->fp = NULL;
+	}
+	r->pid = -1;
+#else
+	(void)r;
+#endif
+}
+
+static void runnerCleanup(editorPane *pane) {
+	runnerData *r = pane->runner;
+	if (!r) return;
+	runnerStop(r);
+	for (int i = 0; i < r->count; i++) free(r->lines[i]);
+	free(r->lines);
+	pthread_mutex_destroy(&r->lock);
+	free(r);
+	pane->runner = NULL;
+}
+
+static void runnerStart(const char *cmd) {
+#ifdef _WIN32
+	(void)cmd;
+	editorSetStatusMessage(":run is not wired on Windows yet — use :!<cmd>");
+#else
+	if (!E.bottom_panel) {
+		E.bottom_panel = editorCreatePane(PANE_RUNNER, 0, 0, E.screencols, 10);
+		if (!E.bottom_panel) return;
+		E.bottom_panel->runner = calloc(1, sizeof(runnerData));
+		if (!E.bottom_panel->runner) {
+			editorFreePane(E.bottom_panel);
+			E.bottom_panel = NULL;
+			return;
+		}
+		pthread_mutex_init(&E.bottom_panel->runner->lock, NULL);
+		editorResizePanes();
+	}
+	runnerData *r = E.bottom_panel->runner;
+	runnerStop(r);
+
+	pthread_mutex_lock(&r->lock);
+	for (int i = 0; i < r->count; i++) free(r->lines[i]);
+	r->count = 0;
+	r->selected = 0;
+	r->scroll_offset = 0;
+	r->truncated = 0;
+	r->exit_code = -1;
+	snprintf(r->cmd, sizeof(r->cmd), "%s", cmd);
+	pthread_mutex_unlock(&r->lock);
+
+	int p[2];
+	if (pipe(p) < 0) {
+		editorSetStatusMessage("pipe failed: %s", strerror(errno));
+		return;
+	}
+	pid_t pid = fork();
+	if (pid < 0) {
+		close(p[0]);
+		close(p[1]);
+		editorSetStatusMessage("fork failed: %s", strerror(errno));
+		return;
+	}
+	if (pid == 0) {
+		dup2(p[1], STDOUT_FILENO);
+		dup2(p[1], STDERR_FILENO);
+		close(p[0]);
+		close(p[1]);
+		execl("/bin/sh", "sh", "-c", r->cmd, (char *)NULL);
+		_exit(127);
+	}
+	close(p[1]);
+	r->fp = fdopen(p[0], "r");
+	r->pid = pid;
+	r->running = 1;
+	if (pthread_create(&r->thread, NULL, runnerThread, r) != 0) {
+		fclose(r->fp);
+		r->fp = NULL;
+		kill(pid, SIGTERM);
+		waitpid(pid, NULL, 0);
+		r->running = 0;
+		editorSetStatusMessage("thread failed");
+		return;
+	}
+	r->thread_valid = 1;
+	editorSetStatusMessage("▶ %s", r->cmd);
+	E.full_redraw_pending = 1;
+#endif
+}
+
+static void runnerErrorStep(int dir) {
+	if (!E.bottom_panel || !E.bottom_panel->runner) {
+		editorSetStatusMessage("No runner output — :build / :run first");
+		return;
+	}
+	runnerData *r = E.bottom_panel->runner;
+	char path[PATH_MAX];
+	int lno = 0, coln = 0, found = -1;
+	pthread_mutex_lock(&r->lock);
+	for (int i = r->selected + dir; i >= 0 && i < r->count; i += dir) {
+		if (runnerParseError(r->lines[i], path, sizeof(path), &lno, &coln)) {
+			found = i;
+			break;
+		}
+	}
+	if (found >= 0) r->selected = found;
+	pthread_mutex_unlock(&r->lock);
+	if (found >= 0) runnerJumpTo(path, lno, coln);
+	else editorSetStatusMessage("No %s error", dir > 0 ? "next" : "previous");
+}
+
+static void runnerAskRei(runnerData *r) {
+	char line_copy[512] = "";
+	char cmd_copy[512];
+	pthread_mutex_lock(&r->lock);
+	if (r->selected >= 0 && r->selected < r->count)
+		snprintf(line_copy, sizeof(line_copy), "%s", r->lines[r->selected]);
+	snprintf(cmd_copy, sizeof(cmd_copy), "%s", r->cmd);
+	pthread_mutex_unlock(&r->lock);
+	if (!line_copy[0]) {
+		editorSetStatusMessage("Nothing selected to send");
+		return;
+	}
+	if (!E.right_panel || E.right_panel->type != PANE_AI) editorToggleAI();
+	if (!E.right_panel || !E.right_panel->ai) return;
+	aiData *ai = E.right_panel->ai;
+	char prompt[1200];
+	snprintf(prompt, sizeof(prompt), "Fix this error from `%s`:\n%s", cmd_copy, line_copy);
+	pthread_mutex_lock(&ai->lock);
+	aiAddHistoryRole(ai, prompt, HK_ROLE_USER);
+	free(ai->current_prompt);
+	ai->current_prompt = strdup(prompt);
+	pthread_mutex_unlock(&ai->lock);
+	aiWorkerSend(ai);
+	editorSetStatusMessage("Sent to %s", E.ai_name);
+}
+
+void runnerRender(editorPane *pane, struct abuf *ab) {
+	(void)ab;
+	runnerData *r = pane->runner;
+	if (!r || pane->height <= 0) return;
+	pthread_mutex_lock(&r->lock);
+
+	char header[256];
+	if (r->running)
+		snprintf(header, sizeof(header), " ▶ %.180s  [running]", r->cmd);
+	else
+		snprintf(header, sizeof(header), " ▶ %.140s  [exit %d]  enter=jump  a=%s  r=rerun  q=close",
+			r->cmd, r->exit_code, E.ai_name);
+	int used = gridPutStr(pane->x, pane->y, header, pane->width, E.theme.status_fg, E.theme.status_bg);
+	for (int x = used; x < pane->width; x++)
+		gridPutCh(pane->x + x, pane->y, ' ', E.theme.status_fg, E.theme.status_bg);
+
+	int body = pane->height - 1;
+	if (r->selected >= r->count) r->selected = r->count ? r->count - 1 : 0;
+	if (r->selected < 0) r->selected = 0;
+	if (r->selected < r->scroll_offset) r->scroll_offset = r->selected;
+	if (body > 0 && r->selected >= r->scroll_offset + body) r->scroll_offset = r->selected - body + 1;
+	if (r->scroll_offset < 0) r->scroll_offset = 0;
+
+	char path[PATH_MAX];
+	int lno, coln;
+	for (int y = 0; y < body; y++) {
+		int idx = r->scroll_offset + y;
+		int gy = pane->y + 1 + y;
+		if (idx < r->count) {
+			Color fg = runnerParseError(r->lines[idx], path, sizeof(path), &lno, &coln)
+				? E.theme.keyword1 : E.theme.fg;
+			Color bg = (idx == r->selected && pane == E.active_pane) ? E.theme.visual_bg : E.theme.bg;
+			int u = gridPutStr(pane->x + 1, gy, r->lines[idx], pane->width - 1, fg, bg);
+			gridPutCh(pane->x, gy, ' ', fg, bg);
+			for (int x = 1 + u; x < pane->width; x++) gridPutCh(pane->x + x, gy, ' ', fg, bg);
+		} else {
+			for (int x = 0; x < pane->width; x++) gridPutCh(pane->x + x, gy, ' ', E.theme.fg, E.theme.bg);
+		}
+	}
+	pthread_mutex_unlock(&r->lock);
+}
+
+void runnerHandleKey(editorPane *pane, int key) {
+	runnerData *r = pane->runner;
+	if (!r) return;
+	switch (key) {
+	case 'j':
+	case ARROW_DOWN:
+		pthread_mutex_lock(&r->lock);
+		if (r->selected < r->count - 1) r->selected++;
+		pthread_mutex_unlock(&r->lock);
+		break;
+
+	case 'k':
+	case ARROW_UP:
+		pthread_mutex_lock(&r->lock);
+		if (r->selected > 0) r->selected--;
+		pthread_mutex_unlock(&r->lock);
+		break;
+
+	case 'g':
+		pthread_mutex_lock(&r->lock);
+		r->selected = 0;
+		r->scroll_offset = 0;
+		pthread_mutex_unlock(&r->lock);
+		break;
+
+	case 'G':
+		pthread_mutex_lock(&r->lock);
+		r->selected = r->count ? r->count - 1 : 0;
+		pthread_mutex_unlock(&r->lock);
+		break;
+
+	case '\r': {
+		char path[PATH_MAX];
+		int lno = 0, coln = 0, ok = 0;
+		pthread_mutex_lock(&r->lock);
+		if (r->selected < r->count)
+			ok = runnerParseError(r->lines[r->selected], path, sizeof(path), &lno, &coln);
+		pthread_mutex_unlock(&r->lock);
+		if (ok) runnerJumpTo(path, lno, coln);
+		else editorSetStatusMessage("No file:line on this line");
+		break;
+	}
+
+	case ']':
+		runnerErrorStep(1);
+		break;
+	case '[':
+		runnerErrorStep(-1);
+		break;
+
+	case 'r': {
+		char c[512];
+		pthread_mutex_lock(&r->lock);
+		int running = r->running;
+		snprintf(c, sizeof(c), "%s", r->cmd);
+		pthread_mutex_unlock(&r->lock);
+		if (running) editorSetStatusMessage("Still running — q stops it first");
+		else if (*c) runnerStart(c);
+		break;
+	}
+
+	case 'a':
+		runnerAskRei(r);
+		break;
+
+	case ':':
+		editorColonCommand();
+		break;
+
+	case 'q':
+	case '\x1b': {
+		pthread_mutex_lock(&r->lock);
+		int running = r->running;
+		pthread_mutex_unlock(&r->lock);
+		if (running) {
+			runnerStop(r);
+			editorSetStatusMessage("Stopped: %s", r->cmd);
+		} else {
+			hkCloseSidePanel(&E.bottom_panel, NULL);
+		}
+		break;
+	}
+	}
+}
+
+static void hkShellPopup(const char *cmdline) {
+	while (*cmdline == ' ') cmdline++;
+	if (!*cmdline) {
+		editorSetStatusMessage("Usage: :!<cmd>");
+		return;
+	}
+	char full[1024];
+	snprintf(full, sizeof(full), "(%s) 2>&1", cmdline);
+	FILE *fp = popen(full, "r");
+	if (!fp) {
+		editorSetStatusMessage("Could not run: %s", cmdline);
+		return;
+	}
+	char **items = NULL;
+	int n = 0, cap = 0;
+	char ln[512];
+	while (fgets(ln, sizeof(ln), fp)) {
+		ln[strcspn(ln, "\r\n")] = '\0';
+		if (n >= 400) break;
+		if (n >= cap) {
+			cap = cap ? cap * 2 : 64;
+			items = realloc(items, cap * sizeof(char *));
+		}
+		items[n++] = strdup(ln);
+	}
+	int rc = pclose(fp);
+#ifdef _WIN32
+	int code = rc;
+#else
+	int code = (rc == -1) ? -1 : WEXITSTATUS(rc);
+#endif
+	char title[80];
+	snprintf(title, sizeof(title), "! exit %d — %.30s", code, cmdline);
+	if (n == 0) editorSetStatusMessage("%s (no output)", title);
+	else editorPopupOpen(title, (const char *const *)items, n, 0, 0);
+	for (int i = 0; i < n; i++) free(items[i]);
+	free(items);
+}
+
 /*** AI assistant ***/
 void editorInitAI() {
-	E.hako_session_id = NULL;
-	E.hako_session_turns = 0;
-	E.hako_session_resumed = 0;
-	E.hako_agent_version = NULL;
 	E.hako_protocol = 1;
-	E.hako_auto_approve = 0;
 }
 
 void editorCleanupAI() {
 	free(E.hako_session_id);
 	E.hako_session_id = NULL;
-	free(E.hako_agent_version);
-	E.hako_agent_version = NULL;
 }
 
 void aiInit(editorPane *pane) {
@@ -7166,17 +7173,11 @@ void aiInit(editorPane *pane) {
 
 	data->history = malloc(sizeof(char*) * AI_HISTORY_MAX);
 	data->history_role = calloc(AI_HISTORY_MAX, 1);
-	data->history_count = 0;
-	data->history_pos = 0;
-	data->scroll_offset = 0;
-	data->mode = MODE_NORMAL;
 	data->visual_start = -1;
 	data->visual_end = -1;
 	data->prompt_buffer = malloc(256);
 	data->prompt_buffer[0] = '\0';
 	data->prompt_capacity = 256;
-	data->active = 1;
-	data->stream_slot = -1;
 	pthread_mutex_init(&data->lock, NULL);
 
 	const char *mascot[] = {
@@ -7200,14 +7201,11 @@ void aiInit(editorPane *pane) {
 	pane->ai = data;
 
 	int rc = hakoLaunch(data);
-	data->launch_status = rc;
 	if (rc == -3) {
-		/* compiled without an agent — graceful, not an error. */
 		data->history[data->history_count++] = strdup("This build ships without an agent.");
 		data->history[data->history_count++] = strdup("Editing works fully; the Rei pane is inactive.");
 		data->history[data->history_count++] = strdup("Get the full build: https://mithraeums.github.io/hake.sh");
 	} else if (rc == -2) {
-		/* editor has the wire; no agent binary on the system yet. */
 		data->history[data->history_count++] = strdup("No hako agent found on this system.");
 		data->history[data->history_count++] = strdup(":install-agent   install it now, in place");
 		data->history[data->history_count++] = strdup("or: curl -fsSL https://mithraeums.github.io/hako.sh | sh");
@@ -7220,6 +7218,18 @@ void aiInit(editorPane *pane) {
 	}
 }
 
+static void aiPromptInsert(aiData *data, char c) {
+	if (data->prompt_len >= data->prompt_capacity - 1) {
+		data->prompt_capacity *= 2;
+		data->prompt_buffer = realloc(data->prompt_buffer, data->prompt_capacity);
+	}
+	memmove(data->prompt_buffer + data->prompt_cursor + 1,
+		data->prompt_buffer + data->prompt_cursor,
+		data->prompt_len - data->prompt_cursor + 1);
+	data->prompt_buffer[data->prompt_cursor++] = c;
+	data->prompt_len++;
+}
+
 static int aiSubmitPrompt(aiData *data) {
 	if (!data || data->prompt_len == 0) return 0;
 	if (data->prompt_buffer[0] == '/') {
@@ -7228,7 +7238,6 @@ static int aiSubmitPrompt(aiData *data) {
 		data->prompt_len = 0;
 		data->prompt_cursor = 0;
 		data->mode = MODE_NORMAL;
-		data->history_pos = MAX(0, data->history_count - 20);
 		editorSetStatusMessage("-- AI NORMAL --");
 		return r;
 	}
@@ -7239,14 +7248,12 @@ static int aiSubmitPrompt(aiData *data) {
 	data->prompt_len = 0;
 	data->prompt_cursor = 0;
 	data->mode = MODE_NORMAL;
-	data->history_pos = MAX(0, data->history_count - 20);
+	editorSetStatusMessage("-- AI NORMAL --");
 	if (data->streaming) {
 		aiAddHistory(data, "Waiting for response...");
-	} else {
-		aiWorkerSend(data);
+		return 1;
 	}
-	editorSetStatusMessage("-- AI NORMAL --");
-	return 1;
+	return 3;
 }
 
 void aiHandleKey(editorPane *pane, int key) {
@@ -7255,8 +7262,6 @@ void aiHandleKey(editorPane *pane, int key) {
 
 	pthread_mutex_lock(&data->lock);
 
-	/* A pending tool-permission request owns the keyboard: y/n/a answer it,
-	   everything else is swallowed so a stray key can't leak into the prompt. */
 	if (data->perm_pending) {
 		const char *dec = NULL;
 		if      (key == 'y' || key == 'Y') dec = "y";
@@ -7270,7 +7275,6 @@ void aiHandleKey(editorPane *pane, int key) {
 			data->perm_pending = 0;
 			aiAddHistory(data, dec[0] == 'n' ? "  denied" :
 			                   dec[0] == 'a' ? "  allowed (always)" : "  allowed");
-			data->history_pos = MAX(0, data->history_count - 20);
 			pthread_mutex_unlock(&data->lock);
 			hakoSendLine(json);
 			return;
@@ -7355,29 +7359,11 @@ void aiHandleKey(editorPane *pane, int key) {
 
 		case '\r':
 		case '\n':
-			if (data->prompt_len >= data->prompt_capacity - 1) {
-				data->prompt_capacity *= 2;
-				data->prompt_buffer = realloc(data->prompt_buffer, data->prompt_capacity);
-			}
-			memmove(data->prompt_buffer + data->prompt_cursor + 1,
-				data->prompt_buffer + data->prompt_cursor,
-				data->prompt_len - data->prompt_cursor + 1);
-			data->prompt_buffer[data->prompt_cursor++] = '\n';
-			data->prompt_len++;
+			aiPromptInsert(data, '\n');
 			break;
 
 		default:
-			if (!iscntrl(key) && key < 128) {
-				if (data->prompt_len >= data->prompt_capacity - 1) {
-					data->prompt_capacity *= 2;
-					data->prompt_buffer = realloc(data->prompt_buffer, data->prompt_capacity);
-				}
-				memmove(data->prompt_buffer + data->prompt_cursor + 1,
-					data->prompt_buffer + data->prompt_cursor,
-					data->prompt_len - data->prompt_cursor + 1);
-				data->prompt_buffer[data->prompt_cursor++] = key;
-				data->prompt_len++;
-			}
+			if (!iscntrl(key) && key < 128) aiPromptInsert(data, (char)key);
 			break;
 		}
 	} else if (data->visual_mode) {
@@ -7510,6 +7496,11 @@ void aiHandleKey(editorPane *pane, int key) {
 					editorToggleAI();
 					return;
 				}
+				if (r == 3) {
+					pthread_mutex_unlock(&data->lock);
+					aiWorkerSend(data);
+					return;
+				}
 			}
 			break;
 			
@@ -7530,23 +7521,6 @@ void aiHandleKey(editorPane *pane, int key) {
 
 		case CTRL_KEY('u'):
 			data->scroll_offset += pane->height / 2;
-			break;
-			
-		case 'h':
-		case ARROW_LEFT:
-			if (data->cursor_x > 0) {
-				data->cursor_x--;
-			}
-			break;
-			
-		case 'l':
-		case ARROW_RIGHT:
-			if (data->cursor_y < data->history_count) {
-				int len = strlen(data->history[data->cursor_y]);
-				if (data->cursor_x < len - 1) {
-					data->cursor_x++;
-				}
-			}
 			break;
 			
 		case 'g':
@@ -7588,26 +7562,21 @@ void aiHandleKey(editorPane *pane, int key) {
 							free(data->history[i]);
 						}
 						data->history_count = 0;
-						data->cursor_x = data->cursor_y = 0;
-						data->history_pos = 0;
+						data->cursor_y = 0;
 						editorSetStatusMessage("AI history cleared");
 					} else if (strcmp(cmd, "auto") == 0) {
-						E.hako_auto_approve = 1;
-						data->perm_pending = 0;  /* a pending prompt is moot now */
+						data->perm_pending = 0;
 						hakoSendLine("{\"type\":\"slash\",\"cmd\":\":auto on\"}");
 						aiAddHistory(data, "auto-approve ON — tools run without prompting (:noauto to undo).");
-						data->history_pos = MAX(0, data->history_count - 20);
 					} else if (strcmp(cmd, "noauto") == 0) {
-						E.hako_auto_approve = 0;
 						hakoSendLine("{\"type\":\"slash\",\"cmd\":\":auto off\"}");
 						aiAddHistory(data, "auto-approve OFF — prompt per tool call (:auto to skip).");
-						data->history_pos = MAX(0, data->history_count - 20);
 					} else if (strcmp(cmd, "install-agent") == 0 ||
 					           strcmp(cmd, "update-agent")  == 0) {
 						int upd = (cmd[0] == 'u');
 						free(cmd);
 						pthread_mutex_unlock(&data->lock);
-						hakoInstallOrUpdate(data, upd);  /* locks internally */
+						hakoInstallOrUpdate(data, upd);
 						return;
 					}
 					free(cmd);
@@ -7632,25 +7601,7 @@ void aiHandleKey(editorPane *pane, int key) {
 
 void editorToggleAI() {
 	if (E.right_panel && E.right_panel->type == PANE_AI) {
-		if (E.active_pane == E.right_panel) {
-			editorPane **leaves = NULL;
-			int lcount = 0;
-			editorCollectLeafPanes(E.root_pane, &leaves, &lcount);
-			if (lcount > 0) {
-				E.active_pane = leaves[0];
-				E.active_pane->is_focused = 1;
-			} else if (E.left_panel) {
-				E.active_pane = E.left_panel;
-				E.active_pane->is_focused = 1;
-			} else {
-				E.active_pane = NULL;
-			}
-			free(leaves);
-		}
-		editorFreePane(E.right_panel);
-		E.right_panel = NULL;
-
-		editorResizePanes();
+		hkCloseSidePanel(&E.right_panel, E.left_panel);
 		return;
 	}
 	
@@ -7676,37 +7627,8 @@ void aiRender(editorPane *pane, struct abuf *ab) {
 	int seg_w = inner_w - 2;
 	if (seg_w < 2) seg_w = 2;
 
-	int pmax = 32;
-	int *pstart = malloc(sizeof(int) * pmax);
-	int *pend = malloc(sizeof(int) * pmax);
-	int plines_total = 0;
-	if (data->prompt_buffer && data->prompt_len > 0) {
-		int i = 0;
-		while (i <= data->prompt_len) {
-			int line_start = i;
-			while (i < data->prompt_len && data->prompt_buffer[i] != '\n') i++;
-			int line_end = i;
-			int seg = line_start;
-			do {
-				int take = (line_end - seg > seg_w) ? seg_w : (line_end - seg);
-				if (plines_total >= pmax) {
-					pmax *= 2;
-					pstart = realloc(pstart, sizeof(int) * pmax);
-					pend = realloc(pend, sizeof(int) * pmax);
-				}
-				pstart[plines_total] = seg;
-				pend[plines_total] = seg + take;
-				plines_total++;
-				seg += take;
-			} while (seg < line_end);
-			if (line_end == data->prompt_len && (data->prompt_len == 0 || data->prompt_buffer[data->prompt_len - 1] != '\n')) break;
-			i++;
-			if (i == data->prompt_len + 1) break;
-		}
-	}
-	if (plines_total == 0) {
-		pstart[0] = 0; pend[0] = 0; plines_total = 1;
-	}
+	int *pstart, *pend;
+	int plines_total = aiPromptSegs(data, seg_w, &pstart, &pend);
 	int plines = plines_total > 5 ? 5 : plines_total;
 	int pscroll = plines_total > plines ? plines_total - plines : 0;
 	int prompt_rows = 1 + plines + 1;
@@ -7960,13 +7882,11 @@ static void hakoSendLine(const char *json) {
 	ssize_t w1 = write(g_hako_fd_write, json, len);
 	ssize_t w2 = write(g_hako_fd_write, "\n", 1);
 	if (w1 < 0 || w2 < 0) {
-		/* pipe broken — hako died. mark as gone so further sends no-op. */
 		close(g_hako_fd_write);
 		g_hako_fd_write = -1;
 	}
 }
 
-/* history helpers — display only; hako owns the API message stack */
 
 void aiAddHistory(aiData *data, const char *text);
 
@@ -8033,15 +7953,13 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 		int   turns    = hkExtractJsonInt(line, "turns");
 		char *provider = hkExtractJsonString(line, "provider");
 		char *model    = hkExtractJsonString(line, "model");
-		char *version  = hkExtractJsonString(line, "version");   /* protocol 2 */
-		int   protocol = hkExtractJsonInt(line, "protocol");     /* absent ⇒ 1 */
+		char *version  = hkExtractJsonString(line, "version");
+		int   protocol = hkExtractJsonInt(line, "protocol");
 
 		free(E.hako_session_id);
 		E.hako_session_id      = session ? session : strdup("");
 		E.hako_session_turns   = turns > 0 ? turns : 0;
 		E.hako_session_resumed = resumed > 0 ? 1 : 0;
-		free(E.hako_agent_version);
-		E.hako_agent_version   = version;  /* may be NULL on protocol 1 */
 		E.hako_protocol        = protocol > 0 ? protocol : 1;
 
 		pthread_mutex_lock(&data->lock);
@@ -8063,11 +7981,11 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 		} else {
 			aiAddHistory(data, "session: new");
 		}
-		data->history_pos = MAX(0, data->history_count - 20);
 		pthread_mutex_unlock(&data->lock);
 
 		free(provider);
 		free(model);
+		free(version);
 
 	} else if (strcmp(type, "message") == 0) {
 		char *role = hkExtractJsonString(line, "role");
@@ -8077,21 +7995,7 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 			if (role && strcmp(role, "ai")   == 0) hrole = HK_ROLE_AI;
 			if (role && strcmp(role, "user") == 0) hrole = HK_ROLE_USER;
 			pthread_mutex_lock(&data->lock);
-			/* close any open streaming slot before adding a full message */
-			if (data->stream_slot >= 0) {
-				free(data->history[data->stream_slot]);
-				data->history[data->stream_slot] = NULL;
-				data->history_count = data->stream_slot;
-				if (data->stream_acc) {
-					aiAddHistoryRole(data, data->stream_acc, HK_ROLE_AI);
-					free(data->stream_acc);
-					data->stream_acc     = NULL;
-					data->stream_acc_len = 0;
-				}
-				data->stream_slot = -1;
-			}
 			aiAddHistoryRole(data, text, hrole);
-			data->history_pos = MAX(0, data->history_count - 20);
 			pthread_mutex_unlock(&data->lock);
 			free(text);
 		}
@@ -8102,14 +8006,11 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 		if (display) {
 			pthread_mutex_lock(&data->lock);
 			aiAddHistory(data, display);
-			data->history_pos = MAX(0, data->history_count - 20);
 			pthread_mutex_unlock(&data->lock);
 			free(display);
 		}
 
 	} else if (strcmp(type, "done") == 0) {
-		int in      = hkExtractJsonInt(line, "in");
-		int out     = hkExtractJsonInt(line, "out");
 		int turn    = hkExtractJsonInt(line, "turn");
 		char *session = hkExtractJsonString(line, "session");
 
@@ -8118,49 +8019,18 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 		E.hako_session_turns = turn > 0 ? turn : E.hako_session_turns;
 
 		pthread_mutex_lock(&data->lock);
-		if (data->stream_slot >= 0) {
-			free(data->history[data->stream_slot]);
-			data->history[data->stream_slot] = NULL;
-			data->history_count = data->stream_slot;
-			if (data->stream_acc) {
-				aiAddHistoryRole(data, data->stream_acc, HK_ROLE_AI);
-				free(data->stream_acc);
-				data->stream_acc     = NULL;
-				data->stream_acc_len = 0;
-			}
-			data->stream_slot = -1;
-		}
-		if (in > 0) {
-			data->last_in_tokens   = in;
-			data->last_out_tokens  = out > 0 ? out : 0;
-			data->total_in_tokens  += in;
-			data->total_out_tokens += out > 0 ? out : 0;
-		}
-		data->streaming   = 0;
-		data->history_pos = MAX(0, data->history_count - 20);
+		data->streaming = 0;
 		pthread_mutex_unlock(&data->lock);
 
 	} else if (strcmp(type, "error") == 0) {
 		char *msg = hkExtractJsonString(line, "message");
 		pthread_mutex_lock(&data->lock);
-		if (data->stream_slot >= 0) {
-			free(data->history[data->stream_slot]);
-			data->history[data->stream_slot] = NULL;
-			data->history_count = data->stream_slot;
-			free(data->stream_acc);
-			data->stream_acc     = NULL;
-			data->stream_acc_len = 0;
-			data->stream_slot    = -1;
-		}
 		aiAddHistory(data, msg ? msg : "Error: unknown");
-		data->streaming   = 0;
-		data->history_pos = MAX(0, data->history_count - 20);
+		data->streaming = 0;
 		pthread_mutex_unlock(&data->lock);
 		free(msg);
 
 	} else if (strcmp(type, "permission_request") == 0) {
-		/* protocol 2: agent wants approval for a tool call. Park a pending
-		   request; the pane intercepts y/n/a and replies permission_response. */
 		int   id      = hkExtractJsonInt(line, "id");
 		char *tool    = hkExtractJsonString(line, "tool");
 		char *kind    = hkExtractJsonString(line, "kind");
@@ -8181,7 +8051,6 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 			                                        "always read this project";
 		snprintf(ask, sizeof(ask), "allow?  [y] once   [n] no   [a] %s", always);
 		aiAddHistory(data, ask);
-		data->history_pos = MAX(0, data->history_count - 20);
 		pthread_mutex_unlock(&data->lock);
 		free(tool); free(kind); free(subject);
 	}
@@ -8206,9 +8075,6 @@ static void *hakoReaderThread(void *arg) {
 	return NULL;
 }
 
-/* Try <dir>/hako, then <dir>/hako-bundled (the BUNDLE_HAKO install name). Prefers
-   a standalone `hako` (user-installed / self-updated) over the bundled copy.
-   Returns malloc'd path to the first executable found, or NULL. */
 static char *hakoTryDir(const char *dir) {
 	static const char *names[] = { "hako", "hako-bundled" };
 	for (int i = 0; i < 2; i++) {
@@ -8223,7 +8089,6 @@ static char *hakoFindBinary(void) {
 	char buf[PATH_MAX];
 	char *found;
 
-	/* 1. Same dir as the running hake binary (bundled install). */
 #ifdef __APPLE__
 	{
 		uint32_t sz = sizeof(buf);
@@ -8246,22 +8111,16 @@ static char *hakoFindBinary(void) {
 	}
 #endif
 
-	/* 2. cwd (dev convenience). */
 	if ((found = hakoTryDir("."))) return found;
 
-	/* 3. ~/.local/bin */
 	const char *home = getenv("HOME");
 	if (home) {
 		snprintf(buf, sizeof(buf), "%s/.local/bin", home);
 		if ((found = hakoTryDir(buf))) return found;
 	}
 
-	/* 4. /usr/local/bin */
 	if ((found = hakoTryDir("/usr/local/bin"))) return found;
 
-	/* 5. Walk $PATH ourselves so we can tell "no agent installed" apart from a
-	   launch error — execvp would hide that as a child exit-127 the parent never
-	   sees. NULL here ⇒ the install offer, not a dead "not connected" pane. */
 	const char *path = getenv("PATH");
 	if (path) {
 		const char *p = path;
@@ -8278,19 +8137,19 @@ static char *hakoFindBinary(void) {
 			p = colon + 1;
 		}
 	}
-	return NULL;  /* no agent anywhere — caller shows the install offer */
+	return NULL;
 }
 
 static int hakoLaunch(aiData *data) {
 #ifdef HAKE_NO_AGENT
-	(void)data; (void)hakoReaderThread; (void)g_hako_reader;  /* keep reader chain referenced */
-	return -3;  /* compiled without an agent (make NO_AGENT=1) */
+	(void)data; (void)hakoReaderThread; (void)g_hako_reader;
+	return -3;
 #elif defined(_WIN32)
 	(void)data; (void)hakoReaderThread; (void)g_hako_reader;
-	return -2;  /* no pipe-agent path on Windows yet — offer install guidance */
+	return -2;
 #else
 	char *bin = hakoFindBinary();
-	if (!bin) return -2;  /* no agent installed — caller offers :install-agent */
+	if (!bin) return -2;
 	int to_child[2], from_child[2];
 	if (pipe(to_child)   < 0 ||
 	    pipe(from_child) < 0) { free(bin); return -1; }
@@ -8331,8 +8190,7 @@ static int hakoLaunch(aiData *data) {
 
 static void hakoShutdown(void) {
 #ifndef _WIN32
-	/* Order: close write + reap child (EOFs the reader's fgets) → join reader → only
-	   then fclose. Reader touches the aiData/mutex the caller frees right after. */
+	/* order matters: EOF child + reap, join reader, then fclose — reader touches aiData */
 	if (g_hako_fd_write >= 0) {
 		const char *quit = "{\"type\":\"quit\"}\n";
 		ssize_t w = write(g_hako_fd_write, quit, strlen(quit));
@@ -8341,12 +8199,10 @@ static void hakoShutdown(void) {
 		g_hako_fd_write = -1;
 	}
 	if (g_hako_pid > 0) {
-		/* graceful: hako sees quit on stdin or EOF, exits.
-		   If still alive after a beat, SIGTERM. Reap to avoid zombie. */
 		for (int i = 0; i < 20; i++) {
 			pid_t r = waitpid(g_hako_pid, NULL, WNOHANG);
 			if (r == g_hako_pid || r < 0) break;
-			usleep(10000); /* 10ms */
+			usleep(10000);
 		}
 		if (waitpid(g_hako_pid, NULL, WNOHANG) == 0) {
 			kill(g_hako_pid, SIGTERM);
@@ -8367,10 +8223,6 @@ static void hakoShutdown(void) {
 #endif
 }
 
-/* :install-agent (update=0) / :update-agent (update=1). Install fetches the latest
-   release; update runs the resolved binary's own `--update` and falls back to the
-   installer if no binary is found. Blocks the UI for the run (explicit user action,
-   like vim's :!cmd), then relaunches the child so the new binary takes effect. */
 static void hakoInstallOrUpdate(aiData *data, int update) {
 #ifdef _WIN32
 	pthread_mutex_lock(&data->lock);
@@ -8388,7 +8240,6 @@ static void hakoInstallOrUpdate(aiData *data, int update) {
 
 	pthread_mutex_lock(&data->lock);
 	aiAddHistory(data, update ? "updating agent..." : "installing agent...");
-	data->history_pos = MAX(0, data->history_count - 20);
 	pthread_mutex_unlock(&data->lock);
 	editorRefreshScreen();
 
@@ -8416,13 +8267,10 @@ static void hakoInstallOrUpdate(aiData *data, int update) {
 		pthread_mutex_unlock(&data->lock);
 		return;
 	}
-	/* relaunch so the freshly-installed binary is the live child */
 	hakoShutdown();
 	int r = hakoLaunch(data);
-	data->launch_status = r;
 	pthread_mutex_lock(&data->lock);
 	aiAddHistory(data, r == 0 ? "agent connected." : "agent still not found after install.");
-	data->history_pos = MAX(0, data->history_count - 20);
 	pthread_mutex_unlock(&data->lock);
 #endif
 }
@@ -8430,16 +8278,11 @@ static void hakoInstallOrUpdate(aiData *data, int update) {
 void aiWorkerSend(aiData *data) {
 	if (!data) return;
 	if (data->streaming) return;
-	if (g_hako_fd_write < 0) {
-		/* agent died (or never started) — try one silent respawn before nagging. */
-		if (hakoLaunch(data) == 0) {
-			data->launch_status = 0;
-		} else {
-			pthread_mutex_lock(&data->lock);
-			aiAddHistory(data, "Agent not connected. :install-agent, or :q rei then :rei.");
-			pthread_mutex_unlock(&data->lock);
-			return;
-		}
+	if (g_hako_fd_write < 0 && hakoLaunch(data) != 0) {
+		pthread_mutex_lock(&data->lock);
+		aiAddHistory(data, "Agent not connected. :install-agent, or :q rei then :rei.");
+		pthread_mutex_unlock(&data->lock);
+		return;
 	}
 	data->streaming = 1;
 	char esc[8192];
@@ -8544,6 +8387,12 @@ void editorGenerateConfig(void) {
 	fprintf(fp, "explorer_enabled=%s\n",     hkRcOr(ek, ev, en, "explorer_enabled", used, "1"));
 	fprintf(fp, "explorer_width=%s\n",       hkRcOr(ek, ev, en, "explorer_width", used, "30"));
 	fprintf(fp, "explorer_show_hidden=%s\n", hkRcOr(ek, ev, en, "explorer_show_hidden", used, "0"));
+	const char *bc = hkRcVal(ek, ev, en, "build_cmd", used);
+	const char *tc = hkRcVal(ek, ev, en, "test_cmd", used);
+	const char *rn = hkRcVal(ek, ev, en, "run_cmd", used);
+	if (bc) fprintf(fp, "build_cmd=%s\n", bc); else fprintf(fp, "# build_cmd=make        # :build\n");
+	if (tc) fprintf(fp, "test_cmd=%s\n", tc); else fprintf(fp, "# test_cmd=make test    # :test\n");
+	if (rn) fprintf(fp, "run_cmd=%s\n", rn); else fprintf(fp, "# run_cmd=./a.out       # :run\n");
 	fprintf(fp, "# theme_bg, theme_fg, theme_comment, ... = R,G,B  override preset colors\n\n");
 
 	fprintf(fp, "# ============================================================\n");
@@ -8575,297 +8424,38 @@ void editorGenerateConfig(void) {
 }
 
 /*** init ***/
+static const struct { const char *name; Theme t; } HK_THEMES[] = {
+	{"mithraeum",    {{10,10,9},    {200,194,178}, {74,70,61},    {138,58,31},   {138,58,31},  {122,138,58},  {120,98,58},   {184,150,86},  {10,10,9},     {184,150,86},  {77,61,26},   {232,226,210}}},
+	{"dark",         {{30,30,30},   {212,212,212}, {106,153,85},  {86,156,214},  {78,201,176}, {206,145,120}, {133,133,133}, {50,50,50},    {212,212,212}, {80,80,80},    {38,79,120},  {255,255,255}}},
+	{"light",        {{255,255,255},{30,30,30},    {0,128,0},     {0,0,200},     {0,128,128},  {163,21,21},   {150,150,150}, {220,220,220}, {30,30,30},    {180,180,180}, {173,214,255},{0,0,0}}},
+	{"gruvbox",      {{40,40,40},   {235,219,178}, {146,131,116}, {251,73,52},   {184,187,38}, {184,187,38},  {124,111,100}, {80,73,69},    {235,219,178}, {80,73,69},    {68,65,59},   {235,219,178}}},
+	{"nord",         {{46,52,64},   {216,222,233}, {76,86,106},   {129,161,193}, {136,192,208},{163,190,140}, {76,86,106},   {59,66,82},    {216,222,233}, {59,66,82},    {67,76,94},   {216,222,233}}},
+	{"dracula",      {{40,42,54},   {248,248,242}, {98,114,164},  {255,121,198}, {139,233,253},{241,250,140}, {98,114,164},  {68,71,90},    {248,248,242}, {68,71,90},    {68,71,90},   {248,248,242}}},
+	{"monokai",      {{39,40,34},   {248,248,242}, {117,113,94},  {249,38,114},  {102,217,239},{230,219,116}, {117,113,94},  {60,61,55},    {248,248,242}, {60,61,55},    {73,72,62},   {248,248,242}}},
+	{"solarized",    {{0,43,54},    {131,148,150}, {88,110,117},  {38,139,210},  {42,161,152}, {42,161,152},  {88,110,117},  {7,54,66},     {147,161,161}, {7,54,66},     {7,54,66},    {147,161,161}}},
+	{"tokyonight",   {{26,27,38},   {192,202,245}, {86,95,137},   {187,154,247}, {125,207,255},{158,206,106}, {60,68,102},   {36,40,59},    {192,202,245}, {60,68,102},   {40,52,87},   {192,202,245}}},
+	{"catppuccin",   {{30,30,46},   {205,214,244}, {108,112,134}, {203,166,247}, {137,220,235},{166,227,161}, {88,91,112},   {49,50,68},    {205,214,244}, {69,71,90},    {69,71,90},   {205,214,244}}},
+	{"onedark",      {{40,44,52},   {171,178,191}, {92,99,112},   {198,120,221}, {86,182,194}, {152,195,121}, {76,82,99},    {33,37,43},    {171,178,191}, {60,64,72},    {62,68,81},   {220,223,228}}},
+	{"material",     {{38,50,56},   {238,255,255}, {84,110,122},  {199,146,234}, {130,170,255},{195,232,141}, {63,81,88},    {32,43,48},    {238,255,255}, {63,81,88},    {51,71,79},   {238,255,255}}},
+	{"everforest",   {{45,53,59},   {211,198,170}, {133,146,137}, {230,126,128}, {127,187,179},{167,192,128}, {86,99,98},    {55,63,68},    {211,198,170}, {67,76,81},    {67,76,81},   {211,198,170}}},
+	{"rosepine",     {{25,23,36},   {224,222,244}, {110,106,134}, {196,167,231}, {156,207,216},{246,193,119}, {82,79,103},   {38,35,58},    {224,222,244}, {49,46,73},    {64,61,82},   {224,222,244}}},
+	{"github-dark",  {{13,17,23},   {201,209,217}, {139,148,158}, {255,123,114}, {121,192,255},{165,214,255}, {72,79,88},    {22,27,34},    {201,209,217}, {48,54,61},    {33,38,45},   {201,209,217}}},
+	{"github-light", {{255,255,255},{36,41,47},    {106,115,125}, {207,34,46},   {5,80,174},   {10,48,105},   {140,149,159}, {240,246,252}, {36,41,47},    {208,215,222}, {221,244,255},{36,41,47}}},
+	{"ayu",          {{15,20,25},   {191,189,182}, {92,103,115},  {255,143,64},  {57,186,230}, {170,217,76},  {60,75,90},    {20,25,31},    {191,189,182}, {38,48,59},    {38,48,59},   {191,189,182}}},
+	{"kanagawa",     {{31,31,40},   {220,215,186}, {114,113,105}, {149,127,184}, {127,180,202},{152,187,108}, {84,84,109},   {42,42,55},    {220,215,186}, {54,54,70},    {43,57,63},   {220,215,186}}},
+};
+
 int editorApplyThemeByName(const char *name) {
 	if (!name) return 0;
-	if (strcmp(name, "mithraeum") == 0) {
-		E.theme_preset = THEME_MITHRAEUM;
-		E.theme.bg           = (Color){10, 10, 9};
-		E.theme.fg           = (Color){200, 194, 178};
-		E.theme.comment      = (Color){74, 70, 61};
-		E.theme.keyword1     = (Color){138, 58, 31};
-		E.theme.keyword2     = (Color){138, 58, 31};
-		E.theme.string       = (Color){122, 138, 58};
-		E.theme.number       = (Color){200, 194, 178};
-		E.theme.match        = (Color){184, 150, 86};
-		E.theme.preprocessor = (Color){138, 58, 31};
-		E.theme.function     = (Color){184, 150, 86};
-		E.theme.type         = (Color){184, 150, 86};
-		E.theme.operator     = (Color){200, 194, 178};
-		E.theme.bracket      = (Color){216, 210, 194};
-		E.theme.line_number  = (Color){120, 98, 58};
-		E.theme.status_bg    = (Color){10, 10, 9};
-		E.theme.status_fg    = (Color){184, 150, 86};
-		E.theme.border       = (Color){184, 150, 86};
-		E.theme.visual_bg    = (Color){42, 39, 34};
-		E.theme.visual_fg    = (Color){232, 226, 210};
-		E.theme.constant     = (Color){184, 150, 86};
-		E.theme.builtin      = (Color){138, 58, 31};
-		E.theme.attribute    = (Color){184, 150, 86};
-		E.theme.char_literal = (Color){122, 138, 58};
-		E.theme.escape       = (Color){184, 150, 86};
-		E.theme.label        = (Color){138, 58, 31};
-	} else if (strcmp(name, "dark") == 0) {
-		E.theme_preset = THEME_DARK;
-		E.theme.bg = (Color){30, 30, 30};
-		E.theme.fg = (Color){212, 212, 212};
-		E.theme.comment = (Color){106, 153, 85};
-		E.theme.keyword1 = (Color){86, 156, 214};
-		E.theme.keyword2 = (Color){78, 201, 176};
-		E.theme.string = (Color){206, 145, 120};
-		E.theme.number = (Color){181, 206, 168};
-		E.theme.line_number = (Color){133, 133, 133};
-		E.theme.status_bg = (Color){50, 50, 50};
-		E.theme.status_fg = (Color){212, 212, 212};
-		E.theme.border = (Color){80, 80, 80};
-		E.theme.visual_bg = (Color){38, 79, 120};
-		E.theme.visual_fg = (Color){255, 255, 255};
-	} else if (strcmp(name, "light") == 0) {
-		E.theme_preset = THEME_LIGHT;
-		E.theme.bg = (Color){255, 255, 255};
-		E.theme.fg = (Color){30, 30, 30};
-		E.theme.comment = (Color){0, 128, 0};
-		E.theme.keyword1 = (Color){0, 0, 200};
-		E.theme.keyword2 = (Color){0, 128, 128};
-		E.theme.string = (Color){163, 21, 21};
-		E.theme.number = (Color){9, 134, 88};
-		E.theme.line_number = (Color){150, 150, 150};
-		E.theme.status_bg = (Color){220, 220, 220};
-		E.theme.status_fg = (Color){30, 30, 30};
-		E.theme.border = (Color){180, 180, 180};
-		E.theme.visual_bg = (Color){173, 214, 255};
-		E.theme.visual_fg = (Color){0, 0, 0};
-	} else if (strcmp(name, "gruvbox") == 0) {
-		E.theme_preset = THEME_GRUVBOX;
-		E.theme.bg = (Color){40, 40, 40};
-		E.theme.fg = (Color){235, 219, 178};
-		E.theme.comment = (Color){146, 131, 116};
-		E.theme.keyword1 = (Color){251, 73, 52};
-		E.theme.keyword2 = (Color){184, 187, 38};
-		E.theme.string = (Color){184, 187, 38};
-		E.theme.number = (Color){211, 134, 155};
-		E.theme.line_number = (Color){124, 111, 100};
-		E.theme.status_bg = (Color){80, 73, 69};
-		E.theme.status_fg = (Color){235, 219, 178};
-		E.theme.border = (Color){80, 73, 69};
-		E.theme.visual_bg = (Color){68, 65, 59};
-		E.theme.visual_fg = (Color){235, 219, 178};
-	} else if (strcmp(name, "nord") == 0) {
-		E.theme_preset = THEME_NORD;
-		E.theme.bg = (Color){46, 52, 64};
-		E.theme.fg = (Color){216, 222, 233};
-		E.theme.comment = (Color){76, 86, 106};
-		E.theme.keyword1 = (Color){129, 161, 193};
-		E.theme.keyword2 = (Color){136, 192, 208};
-		E.theme.string = (Color){163, 190, 140};
-		E.theme.number = (Color){180, 142, 173};
-		E.theme.line_number = (Color){76, 86, 106};
-		E.theme.status_bg = (Color){59, 66, 82};
-		E.theme.status_fg = (Color){216, 222, 233};
-		E.theme.border = (Color){59, 66, 82};
-		E.theme.visual_bg = (Color){67, 76, 94};
-		E.theme.visual_fg = (Color){216, 222, 233};
-	} else if (strcmp(name, "dracula") == 0) {
-		E.theme_preset = THEME_DRACULA;
-		E.theme.bg = (Color){40, 42, 54};
-		E.theme.fg = (Color){248, 248, 242};
-		E.theme.comment = (Color){98, 114, 164};
-		E.theme.keyword1 = (Color){255, 121, 198};
-		E.theme.keyword2 = (Color){139, 233, 253};
-		E.theme.string = (Color){241, 250, 140};
-		E.theme.number = (Color){189, 147, 249};
-		E.theme.line_number = (Color){98, 114, 164};
-		E.theme.status_bg = (Color){68, 71, 90};
-		E.theme.status_fg = (Color){248, 248, 242};
-		E.theme.border = (Color){68, 71, 90};
-		E.theme.visual_bg = (Color){68, 71, 90};
-		E.theme.visual_fg = (Color){248, 248, 242};
-	} else if (strcmp(name, "monokai") == 0) {
-		E.theme_preset = THEME_MONOKAI;
-		E.theme.bg = (Color){39, 40, 34};
-		E.theme.fg = (Color){248, 248, 242};
-		E.theme.comment = (Color){117, 113, 94};
-		E.theme.keyword1 = (Color){249, 38, 114};
-		E.theme.keyword2 = (Color){102, 217, 239};
-		E.theme.string = (Color){230, 219, 116};
-		E.theme.number = (Color){174, 129, 255};
-		E.theme.line_number = (Color){117, 113, 94};
-		E.theme.status_bg = (Color){60, 61, 55};
-		E.theme.status_fg = (Color){248, 248, 242};
-		E.theme.border = (Color){60, 61, 55};
-		E.theme.visual_bg = (Color){73, 72, 62};
-		E.theme.visual_fg = (Color){248, 248, 242};
-	} else if (strcmp(name, "solarized") == 0) {
-		E.theme_preset = THEME_SOLARIZED;
-		E.theme.bg = (Color){0, 43, 54};
-		E.theme.fg = (Color){131, 148, 150};
-		E.theme.comment = (Color){88, 110, 117};
-		E.theme.keyword1 = (Color){38, 139, 210};
-		E.theme.keyword2 = (Color){42, 161, 152};
-		E.theme.string = (Color){42, 161, 152};
-		E.theme.number = (Color){211, 54, 130};
-		E.theme.line_number = (Color){88, 110, 117};
-		E.theme.status_bg = (Color){7, 54, 66};
-		E.theme.status_fg = (Color){147, 161, 161};
-		E.theme.border = (Color){7, 54, 66};
-		E.theme.visual_bg = (Color){7, 54, 66};
-		E.theme.visual_fg = (Color){147, 161, 161};
-	} else if (strcmp(name, "tokyonight") == 0) {
-		E.theme_preset = THEME_TOKYONIGHT;
-		E.theme.bg = (Color){26, 27, 38};
-		E.theme.fg = (Color){192, 202, 245};
-		E.theme.comment = (Color){86, 95, 137};
-		E.theme.keyword1 = (Color){187, 154, 247};
-		E.theme.keyword2 = (Color){125, 207, 255};
-		E.theme.string = (Color){158, 206, 106};
-		E.theme.number = (Color){255, 158, 100};
-		E.theme.line_number = (Color){60, 68, 102};
-		E.theme.status_bg = (Color){36, 40, 59};
-		E.theme.status_fg = (Color){192, 202, 245};
-		E.theme.border = (Color){60, 68, 102};
-		E.theme.visual_bg = (Color){40, 52, 87};
-		E.theme.visual_fg = (Color){192, 202, 245};
-	} else if (strcmp(name, "catppuccin") == 0) {
-		E.theme_preset = THEME_CATPPUCCIN;
-		E.theme.bg = (Color){30, 30, 46};
-		E.theme.fg = (Color){205, 214, 244};
-		E.theme.comment = (Color){108, 112, 134};
-		E.theme.keyword1 = (Color){203, 166, 247};
-		E.theme.keyword2 = (Color){137, 220, 235};
-		E.theme.string = (Color){166, 227, 161};
-		E.theme.number = (Color){250, 179, 135};
-		E.theme.line_number = (Color){88, 91, 112};
-		E.theme.status_bg = (Color){49, 50, 68};
-		E.theme.status_fg = (Color){205, 214, 244};
-		E.theme.border = (Color){69, 71, 90};
-		E.theme.visual_bg = (Color){69, 71, 90};
-		E.theme.visual_fg = (Color){205, 214, 244};
-	} else if (strcmp(name, "onedark") == 0) {
-		E.theme_preset = THEME_ONEDARK;
-		E.theme.bg = (Color){40, 44, 52};
-		E.theme.fg = (Color){171, 178, 191};
-		E.theme.comment = (Color){92, 99, 112};
-		E.theme.keyword1 = (Color){198, 120, 221};
-		E.theme.keyword2 = (Color){86, 182, 194};
-		E.theme.string = (Color){152, 195, 121};
-		E.theme.number = (Color){209, 154, 102};
-		E.theme.line_number = (Color){76, 82, 99};
-		E.theme.status_bg = (Color){33, 37, 43};
-		E.theme.status_fg = (Color){171, 178, 191};
-		E.theme.border = (Color){60, 64, 72};
-		E.theme.visual_bg = (Color){62, 68, 81};
-		E.theme.visual_fg = (Color){220, 223, 228};
-	} else if (strcmp(name, "material") == 0) {
-		E.theme_preset = THEME_MATERIAL;
-		E.theme.bg = (Color){38, 50, 56};
-		E.theme.fg = (Color){238, 255, 255};
-		E.theme.comment = (Color){84, 110, 122};
-		E.theme.keyword1 = (Color){199, 146, 234};
-		E.theme.keyword2 = (Color){130, 170, 255};
-		E.theme.string = (Color){195, 232, 141};
-		E.theme.number = (Color){247, 140, 108};
-		E.theme.line_number = (Color){63, 81, 88};
-		E.theme.status_bg = (Color){32, 43, 48};
-		E.theme.status_fg = (Color){238, 255, 255};
-		E.theme.border = (Color){63, 81, 88};
-		E.theme.visual_bg = (Color){51, 71, 79};
-		E.theme.visual_fg = (Color){238, 255, 255};
-	} else if (strcmp(name, "everforest") == 0) {
-		E.theme_preset = THEME_EVERFOREST;
-		E.theme.bg = (Color){45, 53, 59};
-		E.theme.fg = (Color){211, 198, 170};
-		E.theme.comment = (Color){133, 146, 137};
-		E.theme.keyword1 = (Color){230, 126, 128};
-		E.theme.keyword2 = (Color){127, 187, 179};
-		E.theme.string = (Color){167, 192, 128};
-		E.theme.number = (Color){219, 188, 127};
-		E.theme.line_number = (Color){86, 99, 98};
-		E.theme.status_bg = (Color){55, 63, 68};
-		E.theme.status_fg = (Color){211, 198, 170};
-		E.theme.border = (Color){67, 76, 81};
-		E.theme.visual_bg = (Color){67, 76, 81};
-		E.theme.visual_fg = (Color){211, 198, 170};
-	} else if (strcmp(name, "rosepine") == 0) {
-		E.theme_preset = THEME_ROSEPINE;
-		E.theme.bg = (Color){25, 23, 36};
-		E.theme.fg = (Color){224, 222, 244};
-		E.theme.comment = (Color){110, 106, 134};
-		E.theme.keyword1 = (Color){196, 167, 231};
-		E.theme.keyword2 = (Color){156, 207, 216};
-		E.theme.string = (Color){246, 193, 119};
-		E.theme.number = (Color){235, 188, 186};
-		E.theme.line_number = (Color){82, 79, 103};
-		E.theme.status_bg = (Color){38, 35, 58};
-		E.theme.status_fg = (Color){224, 222, 244};
-		E.theme.border = (Color){49, 46, 73};
-		E.theme.visual_bg = (Color){64, 61, 82};
-		E.theme.visual_fg = (Color){224, 222, 244};
-	} else if (strcmp(name, "github-dark") == 0) {
-		E.theme_preset = THEME_GITHUB_DARK;
-		E.theme.bg = (Color){13, 17, 23};
-		E.theme.fg = (Color){201, 209, 217};
-		E.theme.comment = (Color){139, 148, 158};
-		E.theme.keyword1 = (Color){255, 123, 114};
-		E.theme.keyword2 = (Color){121, 192, 255};
-		E.theme.string = (Color){165, 214, 255};
-		E.theme.number = (Color){121, 192, 255};
-		E.theme.line_number = (Color){72, 79, 88};
-		E.theme.status_bg = (Color){22, 27, 34};
-		E.theme.status_fg = (Color){201, 209, 217};
-		E.theme.border = (Color){48, 54, 61};
-		E.theme.visual_bg = (Color){33, 38, 45};
-		E.theme.visual_fg = (Color){201, 209, 217};
-	} else if (strcmp(name, "github-light") == 0) {
-		E.theme_preset = THEME_GITHUB_LIGHT;
-		E.theme.bg = (Color){255, 255, 255};
-		E.theme.fg = (Color){36, 41, 47};
-		E.theme.comment = (Color){106, 115, 125};
-		E.theme.keyword1 = (Color){207, 34, 46};
-		E.theme.keyword2 = (Color){5, 80, 174};
-		E.theme.string = (Color){10, 48, 105};
-		E.theme.number = (Color){5, 80, 174};
-		E.theme.line_number = (Color){140, 149, 159};
-		E.theme.status_bg = (Color){240, 246, 252};
-		E.theme.status_fg = (Color){36, 41, 47};
-		E.theme.border = (Color){208, 215, 222};
-		E.theme.visual_bg = (Color){221, 244, 255};
-		E.theme.visual_fg = (Color){36, 41, 47};
-	} else if (strcmp(name, "ayu") == 0) {
-		E.theme_preset = THEME_AYU;
-		E.theme.bg = (Color){15, 20, 25};
-		E.theme.fg = (Color){191, 189, 182};
-		E.theme.comment = (Color){92, 103, 115};
-		E.theme.keyword1 = (Color){255, 143, 64};
-		E.theme.keyword2 = (Color){57, 186, 230};
-		E.theme.string = (Color){170, 217, 76};
-		E.theme.number = (Color){215, 155, 255};
-		E.theme.line_number = (Color){60, 75, 90};
-		E.theme.status_bg = (Color){20, 25, 31};
-		E.theme.status_fg = (Color){191, 189, 182};
-		E.theme.border = (Color){38, 48, 59};
-		E.theme.visual_bg = (Color){38, 48, 59};
-		E.theme.visual_fg = (Color){191, 189, 182};
-	} else if (strcmp(name, "kanagawa") == 0) {
-		E.theme_preset = THEME_KANAGAWA;
-		E.theme.bg = (Color){31, 31, 40};
-		E.theme.fg = (Color){220, 215, 186};
-		E.theme.comment = (Color){114, 113, 105};
-		E.theme.keyword1 = (Color){149, 127, 184};
-		E.theme.keyword2 = (Color){127, 180, 202};
-		E.theme.string = (Color){152, 187, 108};
-		E.theme.number = (Color){210, 126, 153};
-		E.theme.line_number = (Color){84, 84, 109};
-		E.theme.status_bg = (Color){42, 42, 55};
-		E.theme.status_fg = (Color){220, 215, 186};
-		E.theme.border = (Color){54, 54, 70};
-		E.theme.visual_bg = (Color){43, 57, 63};
-		E.theme.visual_fg = (Color){220, 215, 186};
-	} else {
-		return 0;
+	for (int i = 0; i < (int)(sizeof(HK_THEMES)/sizeof(HK_THEMES[0])); i++) {
+		if (strcmp(name, HK_THEMES[i].name) != 0) continue;
+		E.theme = HK_THEMES[i].t;
+		snprintf(E.theme_name, sizeof(E.theme_name), "%s", name);
+		gridInvalidateFront();
+		E.full_redraw_pending = 1;
+		return 1;
 	}
-	snprintf(E.theme_name, sizeof(E.theme_name), "%s", name);
-	gridInvalidateFront();
-	E.full_redraw_pending = 1;
-	return 1;
+	return 0;
 }
 
 void initTheme() {
@@ -8931,16 +8521,22 @@ void editorLoadConfig() {
 			E.scroll_speed = atoi(val);
 			if (E.scroll_speed < 1) E.scroll_speed = 3;
 		} else if (strcmp(key, "relative_line_numbers") == 0) {
-			E.relative_line_numbers = atoi(val);
-			if (E.relative_line_numbers) E.show_line_numbers = 2;
-		} else if (strcmp(key, "explorer_enabled") == 0) {
-			E.explorer_enabled = atoi(val);
+			if (atoi(val)) E.show_line_numbers = 2;
 		} else if (strcmp(key, "explorer_width") == 0) {
 			E.explorer_width = atoi(val);
 			if (E.explorer_width < 10) E.explorer_width = 25;
 			if (E.explorer_width > 60) E.explorer_width = 60;
 		} else if (strcmp(key, "explorer_show_hidden") == 0) {
 			E.explorer_show_hidden = atoi(val);
+		} else if (strcmp(key, "build_cmd") == 0) {
+			free(E.build_cmd);
+			E.build_cmd = strdup(val);
+		} else if (strcmp(key, "test_cmd") == 0) {
+			free(E.test_cmd);
+			E.test_cmd = strdup(val);
+		} else if (strcmp(key, "run_cmd") == 0) {
+			free(E.run_cmd);
+			E.run_cmd = strdup(val);
 		} else if (strcmp(key, "theme") == 0) {
 			editorApplyThemeByName(val);
 		} else if (strncmp(key, "ai_", 3) == 0) {
@@ -8955,7 +8551,6 @@ void editorLoadConfig() {
 				else if (strcmp(key, "theme_keyword1") == 0) E.theme.keyword1 = color;
 				else if (strcmp(key, "theme_keyword2") == 0) E.theme.keyword2 = color;
 				else if (strcmp(key, "theme_string") == 0) E.theme.string = color;
-				else if (strcmp(key, "theme_number") == 0) E.theme.number = color;
 				else if (strcmp(key, "theme_line_number") == 0) E.theme.line_number = color;
 				else if (strcmp(key, "theme_status_bg") == 0) E.theme.status_bg = color;
 				else if (strcmp(key, "theme_status_fg") == 0) E.theme.status_fg = color;
@@ -8969,85 +8564,25 @@ void editorLoadConfig() {
 }
 
 void initEditor() {
-	E.screenrows = 0;
-	E.screencols = 0;
 	E.mode = MODE_NORMAL;
-	E.statusmsg[0] = '\0';
-	E.statusmsg_time = 0;
 	E.tab_stop = TAB_STOP;
 	E.use_tabs = 1;
 	E.word_wrap = 1;
-	E.word_wrap_column = 0;
 	E.max_undo_levels = 100;
 	E.show_line_numbers = 1;
-	E.line_number_width = 0;
-	editorInitPasteBuffer();
-	E.in_window_command = 0;
-	E.force_window_command = 0;
 	E.splash_active = 1;
-	E.splash_dismissed = 0;
 	E.full_redraw_pending = 1;
-	E.grid_front = NULL;
-	E.grid_back = NULL;
-	E.grid_w = 0;
-	E.grid_h = 0;
-	E.explorer_enabled = 1;
 	E.explorer_width = 25;
-	E.explorer_show_hidden = 0;
-	E.is_pasting = 0;
-	E.paste_indent_level = 0;
-	E.root_pane = NULL;
-	E.active_pane = NULL;
-	E.left_panel = NULL;
-	E.right_panel = NULL;
-	E.left_panel_width = 0;
-	E.right_panel_width = 0;
-	E.num_panes = 0;
 	E.mouse_enabled = 1;
-	E.mouse_x = 0;
-	E.mouse_y = 0;
-	E.mouse_button = 0;
-	E.plugin_count = 0;
-	E.plugin_dir = NULL;
 	E.auto_indent = 1;
 	E.smart_indent = 1;
+	E.scroll_speed = 3;
+	E.search.wrap_search = 1;
 
-	/* one verified kanji across the suite: 箱 (hako). Panels carry it + a romaji name. */
 	E.explorer_kanji = strdup("箱");
 	E.explorer_name = strdup("Kami");
 	E.ai_kanji = strdup("箱");
 	E.ai_name = strdup("Rei");
-
-	E.indent_guides = 0;
-	E.scroll_speed = 3;
-	E.config_path = NULL;
-	E.theme_preset = THEME_DARK;
-
-	E.search.query = NULL;
-	E.search.last_match_row = -1;
-	E.search.last_match_col = -1;
-	E.search.direction = 1;
-	E.search.wrap_search = 1;
-
-	E.hk.pending_count = 0;
-	E.hk.pending_reg = 0;
-	E.hk.pending_op = 0;
-	E.hk.op_start_x = E.hk.op_start_y = 0;
-	memset(E.hk.registers, 0, sizeof(E.hk.registers));
-	memset(E.hk.marks_x, 0, sizeof(E.hk.marks_x));
-	memset(E.hk.marks_y, 0, sizeof(E.hk.marks_y));
-	E.hk.marks_set = 0;
-	memset(E.hk.jumps, 0, sizeof(E.hk.jumps));
-	E.hk.jump_count = 0;
-	E.hk.jump_pos = 0;
-	E.hk.last_op = 0;
-	E.hk.last_count = 0;
-	E.hk.last_reg = 0;
-	E.hk.last_motion = 0;
-	E.hk.last_motion_arg = 0;
-	E.hk.last_insert = NULL;
-	E.hk.last_insert_len = 0;
-	E.hk.recording_insert = 0;
 
 	initTheme();
 	editorInitAI();
@@ -9094,12 +8629,17 @@ void editorCleanup() {
 	if (E.right_panel) {
 		editorFreePane(E.right_panel);
 	}
+	if (E.bottom_panel) {
+		editorFreePane(E.bottom_panel);
+	}
 
 	editorFreePasteBuffer();
 	hkFreeRegisters();
 	free(E.search.query);
-	free(E.plugin_dir);
 	free(E.config_path);
+	free(E.build_cmd);
+	free(E.test_cmd);
+	free(E.run_cmd);
 
 	free(E.explorer_kanji);
 	free(E.explorer_name);
@@ -9135,7 +8675,6 @@ int main(int argc, char *argv[]) {
 	if (sigaction(SIGWINCH, &sa, NULL) == -1) {
 		die("sigaction");
 	}
-	/* hako subprocess can die mid-turn — don't let SIGPIPE kill the editor */
 	signal(SIGPIPE, SIG_IGN);
 #endif
 

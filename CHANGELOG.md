@@ -3,6 +3,70 @@
 All notable changes to hako-edit (binary: `hake`). Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows semver (`v0.x.y` is pre-1.0; expect breaking changes between minor versions).
 
+## [v0.1.6] — 2026-07-08
+
+Theme: **lean pass — the code speaks for itself.** No new features; the whole file was
+read line by line and made smaller and straighter. `hake.c` drops from 9153 to 8113
+lines (−11.4%) with zero intended behavior change. Builds `-Wall -Wextra` clean in all
+three configs (default, `NO_AGENT=1`, `BUNDLE_HAKO=0`); ASan/UBSan clean; editing flow
+verified live at a pty.
+
+### Changed
+- **Comments stripped to structure.** What remains: license header, `/*** section ***/`
+  table-of-contents lines, the pipe-protocol block, and one thread-teardown invariant.
+- **Theme presets are a data table** (`HK_THEMES[]`) instead of a 290-line if-else
+  chain. Theme struct trimmed to the 12 colors actually rendered.
+- **Duplicated logic folded into shared helpers** — yank/delete lines (`yy`/`dd`),
+  delete-to-EOL (`D`/`C`), delete-word (`dw`/`cw`/dot-repeat), join (`J`), word motions
+  (normal + visual), undo/redo (single engine), word-wrap math (4 helpers replace 10+
+  inline copies), side-panel close (explorer/AI), AI prompt insertion + wrap layout
+  (render and cursor placement now share one segmenter), splash and status bar drawing.
+- Dot-repeating `dw` now fills the register like a first `dw` does (vim-consistent).
+
+### Removed
+- Dead scaffolding with no execution path: plugin system stubs, stream-slot handling
+  (no token event in the wire protocol yet), token-usage counters, ~15 write-only fields,
+  4 unreferenced functions, unused enums (`themePreset`, `MODE_AI`, `MODE_COMMAND`).
+
+### Fixed
+- **Mithraeum status bar text was invisible** — theme set `status_fg` to the same gold
+  as the bar background. The bar is now the brand gold with near-black text, and the
+  bar draws from `status_bg`/`status_fg` as designed (explorer/AI pane headers match).
+- **Visual selection showed no highlight box** — selection now changes only the cell
+  background (text keeps its syntax color), and the mithraeum `visual_bg` was lifted so
+  it survives 256-color quantization (Terminal.app maps to the 256 cube; the old value
+  landed on the same cell as the editor background).
+- **Explorer can no longer clobber unsaved work** — `Enter` on a file opens in a new
+  split when the target pane is dirty (falls back to a status warning if there is no
+  room to split). `o` still always split-opens.
+- **Fast key bursts after `Esc` are no longer swallowed** — the escape-sequence reader
+  consumed the next two bytes even when they weren't a terminal sequence (pasting
+  `<Esc>:cmd` into normal mode, or typing over slow SSH, silently ate keys). Unrecognized
+  bytes are now pushed back and executed. Tradeoff: `Alt+<key>` now behaves as
+  `Esc` then `<key>` instead of being dropped.
+- **Dead-agent deadlock** — pressing Enter on a prompt while the agent process was gone
+  locked an already-held mutex (`aiWorkerSend`'s reconnect path) and froze the editor.
+  The send now happens after the pane lock is released.
+
+### Added
+- **`:e <dir>` opens the explorer at that directory** — `:e ..`, `:e .`, `:e ~/src`
+  all work (vim-style); files behave as before.
+- **`:!<cmd>`** — run a shell command, output (stdout+stderr) in a scrollable popup
+  with the exit code in the title. Blocking, vim-style.
+- **Runner pane** — `:run <cmd>`, `:build` (`build_cmd` from `.hakorc`, default `make`),
+  `:test` (`test_cmd`, default `make test`). Runs async in a bottom pane that streams
+  output live while you keep editing; header shows running state / exit code. Keys in
+  the pane: `j/k` select, `Enter` jump to error, `[`/`]` prev/next error, `r` rerun,
+  `a` send the selected line to the agent, `q` stop (if running) then close. Mouse
+  wheel scrolls; `Ctrl-W` cycles it like any pane. POSIX only for now (`:!` works
+  everywhere).
+- **Quickfix** — lines matching `file:line[:col]` are tinted and jumpable: `]e` / `[e`
+  from normal mode walk errors and put the cursor there (dirty buffers open in a split
+  instead of being replaced — same guard as the explorer).
+- **Send-to-agent** — `a` on an error line opens the Rei pane if needed and asks the
+  agent to fix that error, citing the command that produced it.
+- `.hakorc` keys: `build_cmd`, `test_cmd`, `run_cmd` (preserved and hinted by `:config`).
+
 ## [v0.1.5] — 2026-06-21
 
 Theme: **futureproof the agent wire + make a no-agent build first-class.** The editor
