@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.5-b89656?style=flat-square&labelColor=14130f" alt="v0.1.5"/></a>
+  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.6-b89656?style=flat-square&labelColor=14130f" alt="v0.1.6"/></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-c8c2b2?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/C99-single%20file-c8c2b2?style=flat-square&labelColor=14130f" alt="C99 single file"/>
-  <img src="https://img.shields.io/badge/themes-17-c8c2b2?style=flat-square&labelColor=14130f" alt="17 themes"/>
+  <img src="https://img.shields.io/badge/themes-18-c8c2b2?style=flat-square&labelColor=14130f" alt="18 themes"/>
   <img src="https://img.shields.io/badge/languages-40%2B-c8c2b2?style=flat-square&labelColor=14130f" alt="40+ languages"/>
 </p>
 
@@ -74,9 +74,10 @@
 - **Visual Selection**: character and line modes with yank/delete/change, count feedback
 - **Clipboard**: bracketed paste, system clipboard via `Ctrl-C`/`Ctrl-V`
 - **Fast Search**: incremental with `n`/`N`, all matches highlighted
+- **Runner**: `:build` / `:test` / `:run` stream into a bottom pane while you edit; `]e`/`[e` jump to `file:line` errors; `a` hands the error to Rei. `:!<cmd>` for quick one-shots
 - **Line Numbers**: absolute or relative, dynamic width
 - **Mouse Support**: click to position, scroll wheel moves cursor
-- **17 Themes**: dark, light, gruvbox, nord, dracula, monokai, solarized, tokyonight, catppuccin, onedark, material, everforest, rosepine, github-dark, github-light, ayu, kanagawa
+- **18 Themes**: mithraeum, dark, light, gruvbox, nord, dracula, monokai, solarized, tokyonight, catppuccin, onedark, material, everforest, rosepine, github-dark, github-light, ayu, kanagawa — live-preview picker via `:theme`
 - **Customizable**: every setting in `.hakorc`, model/provider choices persist in `~/.hako/state`
 
 <p align="center"><sub><b>—— II ——</b></sub></p>
@@ -178,11 +179,15 @@ Notes:
 |`Ctrl-C` |Copy to system clipboard|
 |`Ctrl-V` |Paste from system clipboard|
 |`:w`     |Save                   |
-|`:e [filename]`     |Open file   |
+|`:e <file\|dir>`|Open file, or explorer at a directory (`:e ..`)|
 |`:q`     |Quit                   |
 |`:wq`    |Save and quit          |
 |`Ctrl-F` |Page forward           |
 |`Ctrl-B` |Page backward          |
+|`]e,[e`  |Next/previous runner error|
+|`:!<cmd>`|Run shell command (popup)|
+|`:run <cmd>`|Run in the runner pane (async)|
+|`:build,:test`|Run `build_cmd` / `test_cmd` from `.hakorc`|
 
 ### Visual Mode
 
@@ -220,6 +225,21 @@ Notes:
 |`.`        |Toggle hidden files|
 |`r`        |Refresh            |
 |`q,Esc`    |Close explorer     |
+
+### Runner (bottom pane)
+
+`:build`, `:test`, `:run <cmd>` stream a command's output into a bottom pane while you
+keep editing. Lines that look like `file:line[:col]` are highlighted and jumpable —
+the compile/fix loop without leaving the editor.
+
+|Key        |Action                                  |
+|-----------|----------------------------------------|
+|`j,k`      |Select line                             |
+|`Enter`    |Jump to `file:line[:col]` under selection|
+|`],[`      |Next / previous error line              |
+|`a`        |Ask the agent to fix the selected error |
+|`r`        |Rerun                                   |
+|`q`        |Stop if running, close otherwise        |
 
 ### AI Assistant (箱 Rei)
 
@@ -288,6 +308,11 @@ mouse_enabled=1
 theme=dark
 explorer_width=30
 
+# Runner pane
+# build_cmd=make
+# test_cmd=make test
+# run_cmd=./a.out
+
 # AI panel (Rei)
 ai_provider=deepseek          # or anthropic | openai | ollama | mistral | ...
 ai_api_key=sk-...             # not needed for ollama
@@ -319,7 +344,15 @@ hake provides syntax color for 40+ languages, some of which include:
 
 ## Change Log
 
-### v0.1.5 (Latest)
+### v0.1.6 (Latest)
+A lean pass plus the compile loop: smaller, straighter code and a runner pane.
+
+- **−1000 lines** — comments stripped to structure, dead scaffolding deleted, duplicated logic folded into shared helpers, theme presets now a data table. Zero behavior change.
+- **Runner pane** — `:build` / `:test` / `:run <cmd>` stream output live into a bottom pane; `]e`/`[e` jump straight to `file:line` errors; `a` sends the selected error to the agent.
+- **`:!<cmd>`** — shell command output in a popup, vim-style.
+- **Fixes** — mithraeum status-bar contrast, visual selection is a real highlight box (syntax colors kept), the explorer can't clobber unsaved work (splits instead), `:e <dir>` opens the explorer, fast key bursts after `Esc` are no longer swallowed.
+
+### v0.1.5
 Interface polish, an on-brand theme, a unified config — plus two crash fixes.
 
 - **Popup menus** — `:help`, a bare `:theme` (live-preview picker), and `:registers` open scrollable popups (mouse + keyboard).
@@ -333,12 +366,12 @@ Full history → [CHANGELOG.md](./CHANGELOG.md).
 <p align="center"><sub><b>—— VII ——</b></sub></p>
 
 ## Roadmap
-- [ ] Windows parity
-- [ ] Diff-render (fewer redraws)
-- [ ] In-editor slash menus for themes and settings
+- [ ] Windows parity (pipe agent + runner pane)
+- [ ] Custom themes from `.hakorc` in the theme picker
 - [ ] Write-file diff preview with confirm
 - [ ] OpenAI/Ollama tool parity
 - [ ] Buffer list (`:ls`, `:b`)
+- [ ] `:e` tab completion
 
 <p align="center"><sub><b>—— VIII ——</b></sub></p>
 
