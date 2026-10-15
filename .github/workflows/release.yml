@@ -53,6 +53,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # pty smoke test of the editor under ASan+UBSan (save, reload, resize, Rei).
+      - name: Test (linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get install -y -qq python3-pyte || python3 -m pip install --quiet --break-system-packages pyte
+          make smoke
+
       - name: Build (linux)
         if: matrix.platform == 'linux'
         run: |

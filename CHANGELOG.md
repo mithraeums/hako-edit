@@ -3,6 +3,70 @@
 All notable changes to hako-edit (binary: `hake`). Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows semver (`v0.x.y` is pre-1.0; expect breaking changes between minor versions).
 
+## [v0.1.7] - 2026-10-15
+
+theme: **the pane shows what the agent did, and the wire is tested.** ships alongside
+hako-code v0.2.4; the two must move together (the `--pipe` protocol lives on both sides).
+
+### fixed: found editing the release notes in hake (2026-10-15)
+- **wide characters on a wrapped line:** the wrap was measured in bytes while the cursor counted cells, so with katakana on a long line the cursor drifted and backspace deleted a character several places away; the layout is by cells now (a character that would cross the edge starts the next row) for drawing, the cursor, j/k, scrolling and mouse clicks
+- **`x` removed one byte of a multi-byte character** and left the file invalid UTF-8; `x`, `r`, a one-line visual delete and the cursor step after them now work in whole characters
+- **closing a window next to a split froze the cursor:** focus landed on the split itself (no rows, not in the ctrl-w list), so nothing moved and ctrl-w w did nothing until kami was opened; it lands on the nearest window now
+- **the screen flashed while rei worked:** every event from the agent, every line of `:build` output and every reload of a file rei saved cleared the whole screen; the 100 ms redraw repaints only what changed
+- tests: `tools/wide-wrap.py` and `tools/close-pane.py` in `make smoke` (under ASan), and smoke counts full-screen clears during a rei reply; each fails on the old binary
+
+### changed: the new look (2026-10-12)
+- **two suite themes, 19 in all:** `mithraeum` is the riso inks on a dark ground (washi text, bright ultramarine and vermilion; every color at least 4.5:1 on a black terminal), and `washi` is the light one, the inks on paper
+- **code is drawn in the theme's colors.** syntax highlighting was one fixed VS Code palette for every theme, so the comment, keyword and string colors each theme defines were never used, and on a light theme operators were light grey on paper; invisible. The message line and the splash had fixed greys with the same problem
+- **terminal.app (no true color) gets the nearest 256 color.** each channel was rounded down to a sixth, which muddied every theme there; it now picks the nearest of the cube and the grey ramp, so paper stays paper instead of turning pink
+- new icon, the suite's new look: two inks, ultramarine and vermilion, on washi, printed the way a risograph misprints: the block katakana ケ. README banner and badges in the new inks
+- `tools/themes.py`: hako studio's `mithraeum` theme is the washi page now; the terminal themes are unchanged
+
+### added: Rei catches up with the CLI (2026-09-21 → 22)
+- **pickers in the pane.** `:model`, `:provider`, `:sessions`, `:theme` and the model's own `ask_user` arrive as `choice_request` and open the editor's popup; enter answers, esc cancels without leaving the agent waiting
+- **`:cmd` and `/cmd` reach hako** as commands; they were going to the model, which invented an answer
+- **a clean buffer reloads when its file changes on disk**, so rei's edits show up without reopening, and a stale save cannot put the old text back
+- **panes have a title bar** (` 箱 name`, `•` when modified); the bottom bar drops the duplicate name. `pane_titles=0` restores the bare pane
+- `Ctrl-W 1-9` jumps to an editor pane, `Ctrl-W r` / `k` to rei / kami, without the full-screen flash `Ctrl-W w` never had. `:kami` toggles the explorer
+
+### changed: housekeeping (2026-10-12)
+- `install.sh` (behind `mithraeums.github.io/hake.sh`) builds from source where there is no release binary; iSh, 32-bit x86, was refused as "unsupported linux arch". `SOURCE=1` forces it
+- the windows `.exe` icon was still the April art; regenerated from the suite's masters, and `make icons` runs the shared builder instead of a script that no longer existed
+
+### fixed: hardening pass before tag (2026-09-30)
+- **saving could lose data.** the file was truncated before it was written, and a short write (legal on large buffers and network filesystems like icloud) was treated as a failure; leaving the file cut short. written first, truncated after, `fsync`ed
+- **`:w` overwrote rei's edit.** a modified buffer whose file changed on disk was warned about once, then saved over it. `:w` refuses now and says why; **`:w!`** overwrites on purpose, **`:e!`** reloads (the status line already told you to use `:e!`, which did not exist)
+- **a change in the same second as the load went unseen**; the check compared whole seconds. it compares nanoseconds and size now, and it runs on an idle tick, not only after a keypress
+- **agent events over 64 KB were split in two**, the first half parsed with its fields missing (a large tool result, a big diff, a long answer). lines are read whole
+- **`:` commands vanished while rei had focus.** anything but rei's own (`q`, `w`, `clear`, `auto`) was dropped silently; they go to the editor now, so `:help` is always hake's help. hako's help is `i` then `:help`
+- **one mouse key with hako:** `mouse=` (the old `mouse_enabled` still works). `:config` writes it only when you set it; a written default would also switch hako's mouse on, and that takes the scroll wheel. the generated config lists which themes each tool has
+- `make test` (smoke + conformance); release CI runs the smoke test on linux. `hake -v` prints `hake v… (build …)`
+- **hake's 18 themes are now the suite's**: `tools/themes.py` writes hako-code's and hako studio's copies from the table in hake.c (`make themes`; `make themes-check` / `make test` fail on drift)
+- `make smoke` runs on musl (alpine, iSh): ASan/UBSan only where the compiler can link them
+- zero warnings on Ubuntu's gcc 13 at `-O2`: `:e` of a relative name never opens a clipped `cwd/name` path, and every ignored `write()` result is handled
+- status messages name the file, not its absolute path; on a phone-width terminal the useful part never showed
+- new: `make smoke` (pty test of save/undo/on-disk reload/resize/Rei, under ASan+UBSan) and `make conformance`
+
+### fixed
+- **tool output was dropped.** the agent emits `tool_result` with the tool's text; the pane
+  handled only `tool_start`/`tool_end`, so it showed the call and never the result. rendered
+  now, clipped to `HAKE_TOOL_RESULT_LINES` (10) with a `…` marker
+- **nothing was unescaped.** `hkExtractJsonString` returns the raw slice between the quotes,
+  still JSON-escaped, and `message` passed it straight to the history; a literal `\n`
+  mid-sentence. new `hkJsonUnescapeDup()` (incl. `\uXXXX` → UTF-8) used for `message` and
+  `tool_result`
+- **escape scan.** the closing-quote lookbehind could not distinguish `\"` from `\\"`, so a
+  value ending in a backslash ran off the end and read as absent. forward scan honouring
+  escapes, as in hako-code
+- under real gcc: `pos[24]` in the popup footer could be overrun by two ints (now 32); an
+  unused `update` parameter on the windows branch
+
+### added
+- **`tools/pipe-conformance.py`**; drives `hako --pipe` exactly as the rei pane does against
+  the fake engine and asserts the contract: `tool_request` with `id`/`name`/`kind`/`subject`,
+  `approve` runs the tool, `tool_end`, turn completes. this is the check that would have caught
+  the month-long protocol drift fixed in hako-code v0.2.4
+
 ## [v0.1.6] — 2026-07-08
 
 Theme: **lean pass — the code speaks for itself.** No new features; the whole file was

@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://mithraeums.github.io">
-    <img src="https://mithraeums.github.io/assets/banner-hake-dark.svg" alt="hake — a quiet box around the cursor" width="100%"/>
+    <img src="https://mithraeums.github.io/assets/banner-hake.png" alt="hake — a quiet box around the cursor" width="100%"/>
   </a>
 </p>
 
@@ -9,15 +9,15 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.6-b89656?style=flat-square&labelColor=14130f" alt="v0.1.6"/></a>
-  <img src="https://img.shields.io/badge/license-GPL--3.0-c8c2b2?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
-  <img src="https://img.shields.io/badge/C99-single%20file-c8c2b2?style=flat-square&labelColor=14130f" alt="C99 single file"/>
-  <img src="https://img.shields.io/badge/themes-18-c8c2b2?style=flat-square&labelColor=14130f" alt="18 themes"/>
-  <img src="https://img.shields.io/badge/languages-40%2B-c8c2b2?style=flat-square&labelColor=14130f" alt="40+ languages"/>
+  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.7-e2402e?style=flat-square&labelColor=14130f" alt="v0.1.7"/></a>
+  <img src="https://img.shields.io/badge/license-GPL--3.0-2636c4?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
+  <img src="https://img.shields.io/badge/C99-single%20file-2636c4?style=flat-square&labelColor=14130f" alt="C99 single file"/>
+  <img src="https://img.shields.io/badge/themes-19-2636c4?style=flat-square&labelColor=14130f" alt="19 themes"/>
+  <img src="https://img.shields.io/badge/languages-40%2B-2636c4?style=flat-square&labelColor=14130f" alt="40+ languages"/>
 </p>
 
 <p align="center">
-  <sub><a href="https://mithraeums.github.io">site</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-edit/releases">releases</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-code">hako-code</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums">org</a></sub>
+  <sub><a href="https://mithraeums.github.io">site</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-edit/releases">releases</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-code">hako-code</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako">hako (engine)</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-studio">hako-studio</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums">org</a></sub>
 </p>
 
 <br>
@@ -33,7 +33,7 @@
       <sub><b>箱 Kami</b>: file explorer</sub>
     </td>
     <td align="center" width="50%">
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/rei.png?raw=true" alt="Rei AI pane" width="100%"/><br/>
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-edit/rei.png?raw=true" alt="hake with the Rei pane: rei proposes an edit to main.c, it is allowed, and the open buffer reloads with the new code" width="100%"/><br/>
       <sub><b>箱 Rei</b> AI (powered by hako-code)</sub>
     </td>
   </tr>
@@ -54,7 +54,7 @@
 箱 **Rei** lives inside hake; powered by <a href="https://github.com/mithraeums/hako-code">hako-code</a>:
 ```
  ▄█████▄
-██ ███ ██ Rei: v1.1
+██ ███ ██ Rei: hako-code
 █████████ Provider: You Choose
 ▀█▀▀█▀▀█▀ Model: You Choose
 ```
@@ -65,10 +65,10 @@
 
 - **Modal Editing**: Vim-inspired normal, insert, visual, and visual-line modes
 - **Full Motion Set**: counts, named registers, text objects (`diw`, `ci"`, `da(`), marks, jumplist, dot-repeat, `:s/` substitution, bracket match
-- **Multi-Pane Support**: Split horizontally and vertically, resize with `Ctrl-W +/-/</>`
+- **Multi-Pane Support**: Split horizontally and vertically, resize with `Ctrl-W +/-/</>`, jump with `Ctrl-W 1-9`; each pane has a title bar (`pane_titles=0` turns it off)
 - **File Explorer**: 箱 Kami - directory navigation, hidden-file toggle, dirs-first sort
-- **AI Assistant**: 箱 Rei - powered by [hako-code](https://github.com/mithraeums/hako-code) in a split pane. Local hako models (`hako-sho` 3B / `hako-koi` 7B) or any of its 13 cloud providers, function-calling tool loop, SSE streaming, per-project trust and history
-- **Skills**: drop `~/.hako/skills/*.md` into the system prompt, install from any URL with `/skill install`
+- **AI Assistant**: 箱 Rei - [hako-code](https://github.com/mithraeums/hako-code) in a split pane, over its `--pipe` protocol. Local hako models (`hako-sho` 3B / `hako-koi` 7B) or any of its 13 cloud providers; its tools, approvals, pickers and sessions, rendered by the editor. A file Rei edits reloads in its pane
+- **Skills**: the agent's [Agent Skills](https://agentskills.io) — `:skill install owner/repo` from the Rei pane
 - **Syntax Highlighting**: 40+ languages, search-match highlighting persists across edits
 - **Undo/Redo**: time-bounded undo blocks, configurable depth
 - **Visual Selection**: character and line modes with yank/delete/change, count feedback
@@ -77,7 +77,7 @@
 - **Runner**: `:build` / `:test` / `:run` stream into a bottom pane while you edit; `]e`/`[e` jump to `file:line` errors; `a` hands the error to Rei. `:!<cmd>` for quick one-shots
 - **Line Numbers**: absolute or relative, dynamic width
 - **Mouse Support**: click to position, scroll wheel moves cursor
-- **18 Themes**: mithraeum, dark, light, gruvbox, nord, dracula, monokai, solarized, tokyonight, catppuccin, onedark, material, everforest, rosepine, github-dark, github-light, ayu, kanagawa — live-preview picker via `:theme`
+- **19 Themes**: mithraeum and washi (the suite's own, dark and light), dark, light, gruvbox, nord, dracula, monokai, solarized, tokyonight, catppuccin, onedark, material, everforest, rosepine, github-dark, github-light, ayu, kanagawa — live-preview picker via `:theme`
 - **Customizable**: every setting in `.hakorc`, model/provider choices persist in `~/.hako/state`
 
 <p align="center"><sub><b>—— II ——</b></sub></p>
@@ -89,12 +89,10 @@
 gcc hake.c -o hake -lpthread
 
 # Or use the Makefile to also embed the executable icon where the OS allows
-make
-
-# Build flavors
-make BUNDLE_HAKO=1   # default — also builds the hako agent next to hake
-make BUNDLE_HAKO=0   # editor only; :install-agent fetches the agent later
+make                 # the editor; :install-agent fetches the agent later
+make bundle          # the editor AND the hako agent, from ../hako-code/hako.c
 make NO_AGENT=1      # editor with no agent path at all (Rei pane stays inert)
+make test            # smoke test + the --pipe conformance check + theme sync
 ```
 
 **Run**
@@ -112,11 +110,11 @@ cp hake /usr/local/bin/hake          # Linux / macOS
 ## Install
 
 ```sh
-# Curl one-liner (Linux / macOS / Windows-MinGW)
-curl -fsSL https://raw.githubusercontent.com/mithraeums/hako-edit/main/install.sh | sh
+curl -fsSL https://mithraeums.github.io/hake.sh | sh       # the editor
+curl -fsSL https://mithraeums.github.io/install.sh | sh    # the whole suite: editor, agent, engine
 ```
 
-Verifies sha256, installs to `/usr/local/bin` if writable else `~/.local/bin`. macOS quarantine xattr stripped post-install. Set `VERIFY=0` to skip sha verify, `PREFIX=/opt` to relocate.
+Verifies sha256, installs to `/usr/local/bin` if writable else `~/.local/bin`. macOS quarantine xattr stripped post-install. Where there is no release binary (iSh is 32-bit x86) it builds from source. `VERIFY=0` skips the sha check, `PREFIX=/opt` relocates, `SOURCE=1` forces a source build.
 
 ### Executable icon
 
@@ -135,7 +133,7 @@ A plain `gcc hake.c -o hake` produces a working binary on every platform; the ic
 hake compiles on Alpine via [iSh](https://ish.app):
 
 ```sh
-apk add gcc make musl-dev curl
+apk add build-base git curl
 make
 ```
 
@@ -212,13 +210,16 @@ Notes:
 |`Ctrl-W s`|Split horizontal|
 |`Ctrl-W v`|Split vertical  |
 |`Ctrl-W w`|Switch pane     |
-|`Ctrl-W c`|Close pane      |
+|`Ctrl-W 1-9`|Jump to editor pane N|
+|`Ctrl-W r` / `k`|Jump to Rei / Kami|
+|`Ctrl-W + - < >`|Resize       |
+|`Ctrl-W c`|Close pane (`Ctrl-W !` discards unsaved changes)|
 
 ### File Explorer (箱 Kami)
 
 |Key        |Action             |
 |-----------|-------------------|
-|`:e,:explorer`|Toggle explorer |
+|`:kami`, `:ex`|Toggle explorer (`:e <dir>` opens it on a folder) |
 |`j,k`      |Navigate files     |
 |`h,l`      |Parent/open        |
 |`g,G`      |Top/bottom of list |
@@ -267,27 +268,15 @@ the compile/fix loop without leaving the editor.
 When the agent asks to write a file or run a command, the pane prompts inline —
 `● write_file  foo.c` then `[y] once  [n] no  [a] always`. `:auto` skips the prompts.
 
-### Slash commands (inside prompt — forwarded to the agent):
+### Agent commands (inside the prompt — forwarded to hako)
 
-|Command                 |Action                                       |
-|------------------------|---------------------------------------------|
-|`/help`                 |List commands                                |
-|`/provider <name>`      |ollama, anthropic, openai, deepseek, mistral, together, fireworks, openrouter, groq, xai (auto-fills endpoint) |
-|`/model <id>`           |Switch model (persists to `~/.hako/state`)   |
-|`/tools on` / `off`         |Toggle function calling                      |
-|`/trust` / `/trust revoke` | Grant or revoke file-ops in this project  |
-|`/skills [reload]`      |List / reload `~/.hako/skills/*.md`          |
-|`/skill install <url>`  |Download a skill into `~/.hako/skills/`      |
-|`/history local` / `global`|Show path, or move to `<cwd>/.hako/history` |
-|`/file <path>`          |Inject a local file into context             |
-|`/clear`                |Wipe visible history                         |
-|`/usage`                |Show provider/model/trust + token totals     |
-|`/sessions`             |List up to 16 prior sessions                 |
-|`/session [new]`        |Show session info; `new` resets              |
-|`/resume <id>`          |Switch to prior session                      |
-|`/quit`                 |Close the panel                              |
+Anything starting with `:` or `/` that the pane does not own goes to the agent as a
+command, not to the model: `:model`, `:provider`, `:sessions`, `:theme`, `:login`,
+`:skill install`, `:use`, `:usage`, `:help` and the rest. Bare `:model` / `:provider` /
+`:sessions` open the editor's own picker; enter picks, esc cancels. The full list is in
+the [hako-code README](https://github.com/mithraeums/hako-code#commands-inside-prompt).
 
-**Tools** (when trusted): `read_file`, `list_dir`, `read_open_file`, `list_open_files`, `write_file` (path constrained to project; staged when `ai_autowrite=0`), `run_shell` (project must be trusted).
+**Tools** (once the project is trusted with `:trust`): the agent's — `read_file`, `list_dir`, `grep`, `glob`, `write_file`, `edit_file`, `edit_lines`, `run_shell`, `web_fetch` — each behind the `[y]/[n]/[a]` prompt above, with the output shown in the pane.
 
 **Pane control** (any focused pane): `:q rei` / `:q kami` (also `:close <name>`) closes the named side panel.
 
@@ -304,25 +293,26 @@ use_tabs=1
 show_line_numbers=2
 auto_indent=1
 smart_indent=1
-mouse_enabled=1
-theme=dark
+mouse=1          # shared with hako (where it defaults off); mouse_enabled still works
+theme=mithraeum  # shared with hako and hako studio: the same 18 names
 explorer_width=30
+pane_titles=1
 
 # Runner pane
 # build_cmd=make
 # test_cmd=make test
 # run_cmd=./a.out
 
-# AI panel (Rei)
-ai_provider=deepseek          # or anthropic | openai | ollama | mistral | ...
-ai_api_key=sk-...             # not needed for ollama
-ai_model=deepseek-chat
-ai_max_tokens=2048
+# AI panel (Rei) — these are the agent's keys; one ~/.hakorc serves both
+ai_provider=mithraeum         # local hako models; or anthropic | openai | gemini | ollama | ...
+ai_model=hako-sho
+ai_max_tokens=4096
 ai_tools_enabled=1
 ai_stream=1
-ai_autowrite=1                # 0 stages writes to <path>.hako-pending
 # ai_endpoint=                # auto-set for known providers
 ```
+
+Keys are better kept out of the rc: `:login <provider>` in the Rei pane stores them in `~/.hako/credentials`.
 
 Run `:config` to generate a fully documented `.hakorc` with all options.
 
@@ -344,32 +334,25 @@ hake provides syntax color for 40+ languages, some of which include:
 
 ## Change Log
 
-### v0.1.6 (Latest)
-A lean pass plus the compile loop: smaller, straighter code and a runner pane.
+### Latest — v0.1.7
+The Rei pane catches up with hako-code 0.2.4, and the wire between them is now checked by a script instead of by eye.
 
-- **−1000 lines** — comments stripped to structure, dead scaffolding deleted, duplicated logic folded into shared helpers, theme presets now a data table. Zero behavior change.
-- **Runner pane** — `:build` / `:test` / `:run <cmd>` stream output live into a bottom pane; `]e`/`[e` jump straight to `file:line` errors; `a` sends the selected error to the agent.
-- **`:!<cmd>`** — shell command output in a popup, vim-style.
-- **Fixes** — mithraeum status-bar contrast, visual selection is a real highlight box (syntax colors kept), the explorer can't clobber unsaved work (splits instead), `:e <dir>` opens the explorer, fast key bursts after `Esc` are no longer swallowed.
+- **Rei is the CLI in a pane** — `:model` / `:provider` / `:sessions` pickers open as popups, `:cmd` and `/cmd` reach the agent instead of the model, and a file Rei edits reloads in its pane.
+- **Saving cannot lose data** — the file was truncated before it was written, and `:w` could save over Rei's edit. `:w` refuses now and says why; `:w!` and `:e!` do what they say.
+- **Pane title bars**, `Ctrl-W 1-9` / `r` / `k` jumps, and the suite's 19 themes shared with hako and hako studio.
+- **Tool output in the pane** — the agent's `tool_result` was being dropped, so the pane said "ran list_dir" and never what it found. Rendered now, clipped to 10 lines.
+- **Text is unescaped** — a literal `\n` no longer appears mid-sentence; the agent's JSON is decoded (`\uXXXX` included) before it is shown.
+- **A silently dropped field** — the JSON scanner could not tell `\"` from `\\"`, so any value ending in a backslash was read as missing. Same bug as the agent's, same fix.
+- **`tools/pipe-conformance.py`** — drives `hako --pipe` the way the pane does and asserts the approval round trip. No model, no network. Run it whenever either side's protocol moves.
+- **gcc-clean** — a `pos[24]` two ints could overrun, and a Windows-only unused parameter.
 
-### v0.1.5
-Interface polish, an on-brand theme, a unified config — plus two crash fixes.
-
-- **Popup menus** — `:help`, a bare `:theme` (live-preview picker), and `:registers` open scrollable popups (mouse + keyboard).
-- **Mithraeum theme on-brand** — matches the site palette; gold `#b89656` is the primary UI accent (borders, splash, popups, status, line numbers).
-- **One unified `~/.hakorc`** — `:config` merges and preserves the agent's `ai_*` and other tools' keys; defaults `theme=mithraeum`.
-- **Agent integration** — in-pane tool-permission prompts (`[y]/[n]/[a]`), `:install-agent` / `:update-agent`, agent auto-respawn, and a no-agent build (`make NO_AGENT=1`).
-- **Crash fixes** — closing the Rei pane (`Ctrl-C`) no longer use-after-frees the agent reader thread; search no longer reads out of bounds at end of line.
-
-Full history → [CHANGELOG.md](./CHANGELOG.md).
+Earlier versions, and the full detail → [CHANGELOG.md](./CHANGELOG.md).
 
 <p align="center"><sub><b>—— VII ——</b></sub></p>
 
 ## Roadmap
 - [ ] Windows parity (pipe agent + runner pane)
 - [ ] Custom themes from `.hakorc` in the theme picker
-- [ ] Write-file diff preview with confirm
-- [ ] OpenAI/Ollama tool parity
 - [ ] Buffer list (`:ls`, `:b`)
 - [ ] `:e` tab completion
 
@@ -385,37 +368,10 @@ If you share the belief that simplicity empowers creativity, feel free to contri
 
 Please ensure your code follows the existing style. I realize the single file is a personal choice, though if you choose to assist, I have divided the code.<br>
 
-Sections of codebase are as follows:
-1. Includes
-2. Defines
-3. Enums
-4. Struct Declarations
-5. Function Prototypes
-6. Syntax Highlighting
-7. Terminal
-8. Buffer
-9. Helpers
-10. Color
-11. Clipboard
-12. Pane Management
-13. Row Operations
-14. Editor Operations
-15. Cursor Movement
-16. Scrolling
-17. Visual Mode
-18. Undo/Redo
-19. Search
-20. File I/O
-21. Drawing
-22. Input
-23. Mode and Commands
-24. Main Drawing Functions
-25. Input Processing
-26. Splash Screen
-27. Explorer
-28. AI Assistant
-29. Init
-30. Main
+The file is divided into sections marked `/*** name ***/` — includes, defines, structs,
+syntax, terminal, panes, rows, cursor, undo, search, file i/o, drawing, input, popups, splash,
+explorer, runner, the AI pane, the agent pipe client, init, main. `grep -n '^/\*\*\*' hake.c`
+lists them with line numbers.
 
 ### Thank you for your attention.
 This project started out of curiosity and a simple C text editor tutorial. If you hit any issues, feel free to open an issue on GitHub.
