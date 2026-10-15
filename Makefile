@@ -6,17 +6,21 @@
 # Linux:   ELF can't embed icons; icon/hake.png is shipped alongside for use
 #          with a .desktop entry.
 #
-# BUNDLE_HAKO=1 (default): also build the `hako` agent binary from ../hako-code/hako.c.
-#   hake will find and spawn it at runtime for the Rei panel.
-# BUNDLE_HAKO=0: build hake only. Rei pane shows install guidance (:install-agent)
-#   until a hako binary is on the system; the editor can install it in place.
+# `make`        builds the EDITOR only. That is the whole product here; the Rei
+#               pane offers `:install-agent` if no hako is on the system yet.
+# `make bundle` builds hake AND the `hako` agent from ../hako-code/hako.c, for
+#               shipping the pair together.
+# BUNDLE_HAKO=1 forces the agent into the default build (what `make bundle`
+#               sets). It used to be the default, which meant every plain
+#               `make` here recompiled the agent as well — slow, and it built
+#               hako twice when a script already built hako-code itself.
 # NO_AGENT=1: build an editor with NO agent path at all. The Rei pane stays inert and
 #   says "this build ships without an agent" — it never errors. Implies BUNDLE_HAKO=0.
 
 CC          ?= gcc
 CFLAGS      ?= -O2 -Wall
 LDLIBS      ?= -lpthread
-BUNDLE_HAKO ?= 1
+BUNDLE_HAKO ?= 0
 NO_AGENT    ?= 0
 HAKO_SRC    ?= ../hako-code/hako.c
 
@@ -55,18 +59,23 @@ else
 TARGETS = $(BIN)
 endif
 
-.PHONY: all clean icons install uninstall
+.PHONY: all bundle clean icons install uninstall smoke conformance test themes themes-check
 all: $(TARGETS)
+
+# The pair, when you actually want both from this directory.
+bundle:
+	$(MAKE) BUNDLE_HAKO=1 all
 
 # Build the `hako` agent alongside hake when BUNDLE_HAKO=1.
 hako: $(HAKO_SRC)
 	$(CC) $(CFLAGS) $< -o $@ $(LDLIBS)
 
 # ---------- icons ----------
-# Regenerate icon/hake.{icns,ico,png} from icon/hake.svg.
-# Requires rsvg-convert or ImageMagick. iconutil (macOS) → .icns, magick → .ico.
+# icon/ is generated from the suite's shared masters (one chassis, one glyph per
+# product), which live beside the repos, not in them. Needs rsvg-convert.
 icons:
-	@cd $(ICON_DIR) && bash build-icons.sh
+	@[ -f ../assets/icons/build.sh ] && sh ../assets/icons/build.sh hake \
+	  || echo "icons: the masters live in ../assets/icons (the suite checkout), not in this repo"
 
 # ---------- Windows: embed icon via resource (optional — skip if .ico missing) ----------
 ifeq ($(PLATFORM),windows)
@@ -123,7 +132,34 @@ $(BIN): hake.c
 endif
 
 clean:
-	rm -f hake hake.exe hako hake.rc hake.res .hake.r
+	rm -f hake hake.exe hako hake.rc hake.res .hake.r hake_asan
+	rm -rf hake_asan.dSYM
+
+# Every check this repo has. conformance needs a built ../hako-code/hako.
+test: smoke themes-check
+	@if [ -x ../hako-code/hako ]; then $(MAKE) --no-print-directory conformance; \
+	else echo "conformance: skipped (build ../hako-code first)"; fi
+
+# The suite's one theme list lives in hake.c; tools/themes.py writes the agent's
+# and the studio's copies. `make themes` regenerates them, `themes-check` fails on drift.
+themes:
+	python3 tools/themes.py
+themes-check:
+	python3 tools/themes.py --check
+
+# pty smoke test of the editor under ASan+UBSan (needs python3 + pyte)
+# ASan+UBSan where the compiler can link them (musl — Alpine, iSh — ships neither).
+SAN := $(shell printf 'int main(void){return 0;}\n' | $(CC) -fsanitize=address,undefined -x c - -o /dev/null 2>/dev/null && echo -fsanitize=address,undefined)
+smoke:
+	@[ -n "$(SAN)" ] || echo "smoke: this compiler has no ASan/UBSan — running without them"
+	$(CC) $(SAN) -g -O1 -Wall -Wextra hake.c -o hake_asan -lpthread
+	python3 tools/smoke.py ./hake_asan
+	python3 tools/wide-wrap.py ./hake_asan
+	python3 tools/close-pane.py ./hake_asan
+
+# the --pipe contract against a built ../hako-code/hako (no model)
+conformance:
+	python3 tools/pipe-conformance.py
 
 # ---------- install / uninstall ----------
 PREFIX ?=

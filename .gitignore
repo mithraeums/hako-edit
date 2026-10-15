@@ -3,15 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-#version
-backup/
-
 # c ext
 *.so
 
 # build
 build/
-hako
+/hako
 # editor build outputs (source is hake.c / hake.rc — keep those)
 /hake
 hake.exe
@@ -54,3 +51,6 @@ venv.bak/
 
 # vhs recordings — internal tooling, not shipped (outputs live in the website repo)
 vhs/
+*.bak
+*.orig
+
