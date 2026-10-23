@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.7-e2402e?style=flat-square&labelColor=14130f" alt="v0.1.7"/></a>
+  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.1.8-e2402e?style=flat-square&labelColor=14130f" alt="v0.1.8"/></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-2636c4?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/C99-single%20file-2636c4?style=flat-square&labelColor=14130f" alt="C99 single file"/>
   <img src="https://img.shields.io/badge/themes-19-2636c4?style=flat-square&labelColor=14130f" alt="19 themes"/>
@@ -334,17 +334,10 @@ hake provides syntax color for 40+ languages, some of which include:
 
 ## Change Log
 
-### Latest — v0.1.7
-The Rei pane catches up with hako-code 0.2.4, and the wire between them is now checked by a script instead of by eye.
+### Latest — v0.1.8
+A small one, to keep the Rei pane in step with hako-code 0.2.5.
 
-- **Rei is the CLI in a pane** — `:model` / `:provider` / `:sessions` pickers open as popups, `:cmd` and `/cmd` reach the agent instead of the model, and a file Rei edits reloads in its pane.
-- **Saving cannot lose data** — the file was truncated before it was written, and `:w` could save over Rei's edit. `:w` refuses now and says why; `:w!` and `:e!` do what they say.
-- **Pane title bars**, `Ctrl-W 1-9` / `r` / `k` jumps, and the suite's 19 themes shared with hako and hako studio.
-- **Tool output in the pane** — the agent's `tool_result` was being dropped, so the pane said "ran list_dir" and never what it found. Rendered now, clipped to 10 lines.
-- **Text is unescaped** — a literal `\n` no longer appears mid-sentence; the agent's JSON is decoded (`\uXXXX` included) before it is shown.
-- **A silently dropped field** — the JSON scanner could not tell `\"` from `\\"`, so any value ending in a backslash was read as missing. Same bug as the agent's, same fix.
-- **`tools/pipe-conformance.py`** — drives `hako --pipe` the way the pane does and asserts the approval round trip. No model, no network. Run it whenever either side's protocol moves.
-- **gcc-clean** — a `pos[24]` two ints could overrun, and a Windows-only unused parameter.
+- **A menu pick leaves no trace in the chat.** A provider or model change made from a picker shows in the status line (hako's new `state` event) instead of as a line in the conversation.
 
 Earlier versions, and the full detail → [CHANGELOG.md](./CHANGELOG.md).
 
