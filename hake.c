@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 				
 /*** includes ***/
-#define HAKE_VERSION "0.1.7"
+#define HAKE_VERSION "0.1.8"
 
 #include <ctype.h>
 #include <errno.h>
@@ -8350,6 +8350,15 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 		free(provider);
 		free(model);
 		free(version);
+
+	} else if (strcmp(type, "state") == 0) {
+		/* A menu pick in hako says nothing in the chat; it lands here, in the status line. */
+		char *provider = hkExtractJsonString(line, "provider");
+		char *model    = hkExtractJsonString(line, "model");
+		editorSetStatusMessage("Rei: %s%s%s", provider ? provider : "",
+			(model && *model) ? " · " : "", model ? model : "");
+		free(provider);
+		free(model);
 
 	} else if (strcmp(type, "message") == 0) {
 		char *role = hkExtractJsonString(line, "role");

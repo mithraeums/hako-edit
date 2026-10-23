@@ -3,6 +3,11 @@
 All notable changes to hako-edit (binary: `hake`). Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows semver (`v0.x.y` is pre-1.0; expect breaking changes between minor versions).
 
+## [v0.1.8] - 2026-10-22
+
+### changed
+- the Rei pane shows a provider or model change in the status line (hako's new `state` event); a menu pick no longer writes anything into the chat
+
 ## [v0.1.7] - 2026-10-15
 
 theme: **the pane shows what the agent did, and the wire is tested.** ships alongside
