@@ -343,14 +343,6 @@ Earlier versions, and the full detail → [CHANGELOG.md](./CHANGELOG.md).
 
 <p align="center"><sub><b>—— VII ——</b></sub></p>
 
-## Roadmap
-- [ ] Windows parity (pipe agent + runner pane)
-- [ ] Custom themes from `.hakorc` in the theme picker
-- [ ] Buffer list (`:ls`, `:b`)
-- [ ] `:e` tab completion
-
-<p align="center"><sub><b>—— VIII ——</b></sub></p>
-
 ## Contributing
 If you share the belief that simplicity empowers creativity, feel free to contribute.
 
