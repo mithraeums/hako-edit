@@ -103,7 +103,7 @@ def main():
     HAKE = os.path.join(bindir, "hake")
 
     print("1  edit, save, undo")
-    r = Run("a.txt"); r.wait_for(":help for commands", 10); r.pump(0.3)
+    r = Run("a.txt"); r.wait_for('"a.txt"', 10); r.pump(0.3)
     r.keys("ihello world\x1b"); r.cmd("w")
     check(read("a.txt") == "hello world\n", "save writes the buffer", r)
     r.keys("ddu"); r.pump(0.3)
@@ -142,7 +142,7 @@ def main():
     check(r.clears == 0, "and the screen is not cleared for it (%d full clears)" % r.clears, r)
     check("AI NORMAL" in r.text() or "press 'i'" in r.text(), "ctrl-w r focuses Rei", r)
     r.keys(":help\r"); r.pump(0.5)
-    check(r.wait_for("Help — commands & keys", 3), ":help with Rei focused opens the editor's help (it used to vanish)", r)
+    check(r.wait_for("Help: commands & keys", 3), ":help with Rei focused opens the editor's help (it used to vanish)", r)
     r.keys("\x1b"); r.pump(0.3)
     r.cmd("rei"); r.pump(0.3)
 

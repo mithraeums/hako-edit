@@ -147,7 +147,8 @@ themes:
 themes-check:
 	python3 tools/themes.py --check
 
-# pty smoke test of the editor under ASan+UBSan (needs python3 + pyte)
+# pty smoke test of the editor under ASan+UBSan (needs python3 + pyte): saving, panes,
+# the rc, nano/emacs keys, the console, the Rei menu; then the highlighting (hl-test)
 # ASan+UBSan where the compiler can link them (musl — Alpine, iSh — ships neither).
 SAN := $(shell printf 'int main(void){return 0;}\n' | $(CC) -fsanitize=address,undefined -x c - -o /dev/null 2>/dev/null && echo -fsanitize=address,undefined)
 smoke:
@@ -156,6 +157,8 @@ smoke:
 	python3 tools/smoke.py ./hake_asan
 	python3 tools/wide-wrap.py ./hake_asan
 	python3 tools/close-pane.py ./hake_asan
+	python3 tools/modes.py ./hake_asan
+	python3 tools/hl-test.py ./hake_asan
 
 # the --pipe contract against a built ../hako-code/hako (no model)
 conformance:

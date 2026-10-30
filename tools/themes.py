@@ -22,17 +22,17 @@ SLOTS = ["bg", "fg", "comment", "keyword1", "keyword2", "string", "line_number",
 
 # The two that existed everywhere before the lists were joined: keep their look.
 AGENT_TUNED = {
-    # the suite's inks on a dark terminal: legibility first (>= 5:1 on black)
-    "mithraeum": ["0x8d99ff", "0xe8e2d2", "0x9a9383", "HK_C_BOLDRED", "0xd6c496", "0x8d99ff", "0x8d99ff", "0x8a8473", "0x5f5a4e"],
+    # the suite's one ink on a dark terminal (2026-10-30: bone, faint tints, no blue): >= 5:1 on black
+    "mithraeum": ["0xe6e0d1", "0xe6e0d1", "0x9a9383", "HK_C_BOLDRED", "0xdccfae", "0xaeb398", "0xb7bdca", "0x8a8473", "0x5f5a4e"],
     "nord":      ["0x8fbcbb", "0xe5e9f0", "0x6c788d", "HK_C_BOLDRED", "0xd08770", "0xa3be8c", "0x88c0d0", "0x646e80", "0x4c566a"],
 }
 STUDIO_TUNED = {
-    # the suite's look on a dark ground, and on paper
-    "mithraeum": dict(bg='#14130f', panel='#1b1a16', **{'panel-2': '#23211c'}, line='#2e2b24', **{'line-2': '#3c382f'},
-                      bone='#e8e2d2', gold='#8d99ff', **{'gold-dim': '#5d68c2'}, phos='#d6c496',
-                      dim='#8a8473', faint='#5f5a4e', err='#ff5a4a', ink='#14130f'),
+    # the suite's look, one ink on one ground: night (bone on void) and paper (sumi on washi)
+    "mithraeum": dict(bg='#0d0c0a', panel='#151410', **{'panel-2': '#1d1b17'}, line='#2a2722', **{'line-2': '#3a362e'},
+                      bone='#e6e0d1', gold='#e6e0d1', **{'gold-dim': '#8c8677'}, phos='#bdb6a5',
+                      dim='#8a8473', faint='#5f5a4e', err='#ff5a4a', ink='#0d0c0a'),
     "washi":     dict(bg='#ece7da', panel='#e4dece', **{'panel-2': '#dad3c1'}, line='#cfc7b3', **{'line-2': '#b9b09a'},
-                      bone='#1d1c19', gold='#2636c4', **{'gold-dim': '#6a76c9'}, phos='#6b4a2b',
+                      bone='#1d1c19', gold='#14130f', **{'gold-dim': '#6e685a'}, phos='#4a463d',
                       dim='#5f5a4e', faint='#8a8473', err='#c2311f', ink='#ece7da'),
     "nord":      dict(bg='#2e3440', panel='#333b49', **{'panel-2': '#3b4252'}, line='#434c5e', **{'line-2': '#4c566a'},
                       bone='#e5e9f0', gold='#88c0d0', **{'gold-dim': '#5e81ac'}, phos='#a3be8c',

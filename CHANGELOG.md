@@ -3,6 +3,50 @@
 All notable changes to hako-edit (binary: `hake`). Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows semver (`v0.x.y` is pre-1.0; expect breaking changes between minor versions).
 
+## [Unreleased]
+
+## [v0.2.0] - 2026-10-29
+
+### changed: lighter, like vim
+- the `mithraeum` and `washi` themes print in one ink like the rest of the suite: bone on near-black and sumi on paper, faint tints for syntax, every color at least 4.5:1; no blue, no vermilion
+- the icon is one ink on one ground, like the rest of the suite: sumi on washi (the windows `.exe` carries it)
+- the splash and the mascot are gone (the block letters, the Rei pane's invader); with no file you get vim's start screen: `~` rows and a few lines in the middle (name, version, the keys for your key mode) that go on the first key
+- one window has no status bar, no title bar and no line numbers; a ruler (name, filetype, `line,col`) sits at the right of the last line. the bar and the title bars come with a second pane. `status_line=0|1|2` and `show_line_numbers=1` bring them back
+- normal mode says nothing on the last line; a file opens with `"name" 12L, 340B`
+- `terminal` is the default theme: the profile's own fg/bg and its 16 colors, no background painted, reverse video for the status bar and the selection
+- no full-screen clears from popups, the theme picker or the runner (the grid diff repaints); mouse reporting drops any-motion tracking, so moving the mouse no longer wakes the editor
+- the window commands no longer narrate (`Split pane created`, `Pane closed`, `Explorer opened`)
+
+### added
+- **emacs and nano keys**: `hake --emacs`, `hake --nano` (or `--vim`) for a run, `edit.keys=emacs|nano` in the rc. nano: `^O ^X ^W ^\ ^K ^U ^G ^C ^_ ^R`, mark and copy, two rows of shortcuts at the bottom. emacs: `C-x C-s/C-c/C-f/C-w`, motion, `C-k C-y`, region with `C-SPC C-w M-w`, incremental `C-s C-r`, `C-/`, `C-x b`, `C-x 2 3 o 0 1`. the panes and every `:` command work in all three: `^T` in nano, `M-x` in emacs
+- **`:console`**: a shell line under the runner's output, in the project dir, with history; `console_sandbox=1` runs each line under `sandbox-exec` (macOS) or `bwrap` (Linux), writes only to the project and `$TMPDIR`, no network, and refuses to run when neither exists. a project rc cannot set it
+- **one rc, layered**: the first of `$HAKORC`, `~/.hakorc`, `${XDG_CONFIG_HOME:-~/.config}/hako/hakorc`, then the project's `./.hakorc` on top (it used to replace the home one). `edit.` keys are hake's and win; `code.` and `studio.` keys are skipped. a project rc cannot set `ai_endpoint`, `ai_api_key`, `ai_auto_approve`, `editor`, `voice_cmd`, `console_sandbox` or a `*_cmd` other than `build_cmd`, `test_cmd`, `run_cmd`, and says so once. `HAKORC` is passed on, so the agent reads the same file
+- **custom themes**: `theme.<name>.<slot>=#rrggbb|ansiN|default`, `theme.<name>.base=<preset>`; they show in the picker after the presets. `theme_bg=R,G,B` still works
+- `:theme` and the picker save the pick: the line that holds `edit.theme` (or `theme`) is rewritten in place, comments and order kept. `:config` opens the rc (a short commented one when there is none); `:config key=value` sets one key in place; `:set key=value` (and `:set nu`, `:set nowrap`) for the session
+- the Rei pane draws hako's commands as a menu over its input when the line starts with `:` or `/` (from `commands` in hako's init or state): `up`/`down`, `tab` completes, `enter` runs, `esc` closes the menu and keeps the line; without `commands` (an older hako) nothing changes
+- the Rei pane looks like hako: `›` your lines, `◆` opens a reply and `│` runs down it, `├` for each tool with its output under it, `·` notices, the chat's name highlighted in the header (no brackets); the three startup lines are one
+- `:voice` goes to hako; `:undo`, `:redo`; `hake --hl-dump <file>`
+
+### fixed: syntax
+- a new highlighter that reads tokens: multi-line strings (python `"""`, js templates, go raw strings, lua `[[ ]]`, shell and rust strings over lines), nested block comments (rust, swift, haskell, ocaml), escapes (`\x41`, `\u{..}`), numbers (`0x1F`, `1e-5`, `1_000`, `10u32`, not `x1` or `0..10`), char literals against rust lifetimes and primes, `#include <...>`, decorators, `$vars` (also inside shell strings), `name!` macros, and keywords matched as whole words (a prefix match colored the start of longer names)
+- **markdown**: atx and setext headings, emphasis, strong, both, strikethrough, inline code, fenced blocks highlighted in their language (` ```c `), lists and task boxes (done ones struck through), links, images, autolinks and bare urls, quotes, rules, tables (header, delimiter row, pipes), `<!-- -->`, yaml front matter, backslash escapes, `snake_case` left alone
+- c++ and typescript files had no `if`/`for`/`return` (their lists held only the extras); `.txt` and every unknown file were colored as an rc file, so an apostrophe turned the rest of the line into a string; `Makefile` matched any path containing the word; plain `.css` treated `//` in `url(http://...)` as a comment; yaml read `it's` as a string
+- new: diff/patch, ini/conf (`.editorconfig`, `.gitconfig`, `.env` ...), scss, jsonc, `.hakorc` keys, xml split from html, `#!` picks the type of a file with no extension; search matches draw like a selection
+- `tools/hl-test.py` (in `make smoke`) pins 95 pieces of the samples in `tools/hl/`
+
+### fixed
+- the Rei pane wrapped long lines at a fixed column, through the middle of words (`replac` / `ed`); it breaks between words now, and mid-word only for a word longer than the pane (pinned in `tools/modes.py`)
+- `:split <file>` and `:vsplit <file>` open the file in the new pane, as in vim; with a file named they did nothing at all
+- a folder with its own `.hakorc` freed the path `:console`'s sandbox is rooted at, so a sandboxed command read freed memory
+- `console_sandbox=1`: the command starts in its own session, so it cannot open the terminal and type into the editor, and a project path with a quote in it no longer runs (it would have rewritten the macOS sandbox profile)
+- nano: M-< goes to the previous window (it went forward, like M->), and the shortcut rows keep a space between columns
+- smart indent stays out of prose: a markdown or plain text line ending in `:` or `(` keeps its indent instead of adding one
+- runner and console commands read `/dev/null`, not the editor's keyboard, and stop as a process group
+- `:e` on a modified buffer threw the changes away; it opens beside it now (vim refuses)
+- hake.c builds with zig `-std=c99` for linux (glibc, musl, i386, arm64) and freebsd: the posix names needed feature macros; zero warnings there, with clang and with mingw (four old windows-only warnings gone)
+- startup with a 10k-line C file: 34 to 20 ms
+- tests: `tools/modes.py` (in `make smoke`, under ASan): the layered rc and its denylist, theme writes, custom themes, the start screen, nano, emacs, the console and its sandbox, the Rei menu; fails 8 checks on the 0.1.8 binary. `pipe-conformance.py` uses a temp dir, not fixed paths in `/tmp`
+
 ## [v0.1.8] - 2026-10-22
 
 ### changed
