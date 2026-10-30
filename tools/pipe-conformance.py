@@ -23,8 +23,10 @@ ROOT = os.path.dirname(EDIT)
 FAKE = os.path.join(ROOT, "hako-code", "tools", "tty", "fakehakm.py")
 HAKO = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "hako-code", "hako")
 
-HOME = "/tmp/hakopipe_home"
-PROJ = "/tmp/hakopipe_proj"
+import tempfile
+_WORK = tempfile.mkdtemp(prefix="hakopipe-")
+HOME = os.path.join(_WORK, "home")
+PROJ = os.path.join(_WORK, "proj")
 
 fails = []
 def check(cond, what):

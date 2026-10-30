@@ -18,13 +18,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 				
 /*** includes ***/
-#define HAKE_VERSION "0.1.8"
+#define HAKE_VERSION "0.2.0"
+
+/* POSIX + BSD names (popen, strdup, getline, st_mtim ...) under a strict -std=c99 */
+#if !defined(_WIN32)
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+#endif
 
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -103,9 +114,6 @@ static long hk_getline(char **lineptr, size_t *n, FILE *stream) {
 /*** defines ***/
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define ABUF_INIT {NULL, 0, 0}
-#define HL_HIGHLIGHT_NUMBERS (1<<0)
-#define HL_HIGHLIGHT_STRINGS (1<<1)
-#define HLDB_ENTRIES (sizeof(HLDB) / sizeof(HLDB[0]))
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define TAB_STOP 8
@@ -114,60 +122,60 @@ static long hk_getline(char **lineptr, size_t *n, FILE *stream) {
 #define PASTE_BUFFER_MAX 65536
 
 const char *HAKE_HELP_TEXT =
-	"hake v" HAKE_VERSION " — the hako editor (hako-edit)\n\n"
+	"hake v" HAKE_VERSION " - the hako editor (hako-edit)\n\n"
 	"Usage: hake [options] [file]\n\n"
 	"Options:\n"
-	"  -h, --help     Show this help message\n"
-	"  -v, --version  Show version information\n\n"
-	"Commands:\n"
-	"  Normal Mode:\n"
-	"    i              Enter insert mode\n"
-	"    I              Insert at first non-blank\n"
-	"    a              Append after cursor\n"
-	"    A              Append at end of line\n"
-	"    o              Open line below\n"
-	"    O              Open line above\n"
-	"    v              Enter visual mode (character)\n"
-	"    V              Enter visual mode (line)\n"
-	"    h,j,k,l        Move cursor (or arrow keys)\n"
-	"    0              Beginning of line\n"
-	"    $              End of line\n"
-	"    w              Next word\n"
-	"    b              Previous word\n"
-	"    :w             Save file\n"
-	"    :q             Quit (fails if unsaved)\n"
-	"    :q!            Force quit\n"
-	"    :wq            Save and quit\n"
-	"    :<number>      Jump to line number\n"
-	"    /              Search\n"
-	"    u              Undo\n"
-	"    Ctrl-R         Redo\n"
-	"    dd             Delete line\n"
-	"    D              Delete to end of line\n"
-	"    x              Delete character\n"
-	"    C              Change to end of line\n"
-	"    yy             Yank line\n"
-	"    p              Paste after\n"
-	"    P              Paste before\n"
-	"    r              Replace character\n"
-	"    J              Join lines\n"
-	"    gg             Jump to top\n"
-	"    G              Jump to bottom\n"
-	"    Ctrl-F         Page forward\n"
-	"    Ctrl-B         Page backward\n"
-	"    ]e / [e        Next / previous runner error\n\n"
-	"  Command Mode:\n"
-	"    :!<cmd>        Run shell command, output in popup\n"
-	"    :run <cmd>     Run command in the runner pane (async)\n"
-	"    :build         Run build_cmd from .hakorc (default: make)\n"
-	"    :test          Run test_cmd from .hakorc (default: make test)\n\n"
-	"  Visual Mode:\n"
-	"    y              Yank selection\n"
-	"    d,x            Delete/cut selection\n"
-	"    c              Change selection\n"
-	"    Esc            Exit visual mode\n\n"
-	"  Insert Mode:\n"
-	"    Esc            Return to normal mode\n";
+	"  --vim, --emacs, --nano   key mode for this run (rc: edit.keys=vim|emacs|nano)\n"
+	"  --hl-dump <file>         print each line and its highlight classes\n"
+	"  -h, --help               this help\n"
+	"  -v, --version            version\n\n"
+	"Commands (every key mode; nano ^T, emacs M-x):\n"
+	"  :w [file]  :q  :q!  :wq  :e <file|dir>  :<line>  :s/a/b/g  :%s/a/b/g\n"
+	"  :sp :vs    split          :kami        the file explorer\n"
+	"  :rei       the hako agent  :console     a shell pane (console_sandbox=1 boxes it)\n"
+	"  :build :test :run [cmd]   the runner pane; ]e [e jump to errors\n"
+	"  :!cmd      output in a popup\n"
+	"  :theme [name]             pick or set a theme (saved to the rc)\n"
+	"  :config [key=value]       open the rc, or set one key in it\n"
+	"  :set key=value            for this session (:set nu, :set nowrap)\n"
+	"  :voice [on|off]           read replies aloud (hako)\n"
+	"  :undo :redo :reg :help\n\n"
+	"Vim keys (the default):\n"
+	"  i I a A o O        insert        v V           visual\n"
+	"  h j k l w b 0 $    move          gg G :<n>     top, bottom, line\n"
+	"  x dd D C dw cw cc  delete        yy p P        yank, put\n"
+	"  u Ctrl-R .         undo, redo, repeat           / n N * #  search\n"
+	"  di( ci\" ya{ ...    text objects  m` '         marks\n"
+	"  Ctrl-F Ctrl-B      page          Ctrl-O Tab    jump list\n"
+	"  Ctrl-W s v w c 1-9 r k          windows\n"
+	"  Esc                normal mode\n";
+
+static const char *HK_EMACS_HELP =
+	"Emacs keys (edit.keys=emacs or --emacs)\n\n"
+	"  C-f C-b C-n C-p    move          M-f M-b       word\n"
+	"  C-a C-e            line          M-< M->       buffer\n"
+	"  C-v M-v            page          M-g           go to line\n"
+	"  C-SPC              mark          C-w M-w       kill, copy region\n"
+	"  C-k                kill line     C-y           yank\n"
+	"  C-s C-r            search        M-%           replace\n"
+	"  C-/                undo          C-g           cancel\n"
+	"  C-x C-s            save          C-x C-w       save as\n"
+	"  C-x C-f            find file     C-x C-c       quit\n"
+	"  C-x b              buffers       C-x k         close buffer\n"
+	"  C-x 2 3 o 0 1      windows       M-x           any : command\n\n";
+
+static const char *HK_NANO_HELP =
+	"Nano keys (edit.keys=nano or --nano)\n\n"
+	"  ^O  write out       ^X  exit (asks to save)\n"
+	"  ^W  where is        M-W find next\n"
+	"  ^\\  replace         ^_  go to line\n"
+	"  ^K  cut line        ^U  paste\n"
+	"  ^^  mark (M-A)      M-6 copy\n"
+	"  ^C  position        ^G  this help\n"
+	"  ^R  insert a file   ^S  save\n"
+	"  ^A ^E  line start, end        ^Y ^V  page\n"
+	"  M-U M-E  undo, redo           M-< M->  other pane\n"
+	"  ^T  a : command (:rei, :console, :theme ...)\n\n";
 
 /*** enums ***/
 enum editorMode {
@@ -191,7 +199,8 @@ enum editorKey {
 	MOUSE_WHEEL_UP,
 	MOUSE_WHEEL_DOWN,
 	MOUSE_CLICK,
-	MOUSE_MOTION
+	MOUSE_MOTION,
+	CTRL_SPACE_KEY
 };
 
 enum editorHighlight {
@@ -213,7 +222,25 @@ enum editorHighlight {
 	HL_ATTRIBUTE,
 	HL_CHAR,
 	HL_ESCAPE,
-	HL_LABEL
+	HL_LABEL,
+	HL_HEADING,
+	HL_STRONG,
+	HL_EMPH,
+	HL_STRONGEMPH,
+	HL_STRIKE,
+	HL_CODE,
+	HL_LINK,
+	HL_URL,
+	HL_MARKER,
+	HL_QUOTE,
+	HL_DONE,
+	HL_DELIM,
+	HL_DIFF_ADD,
+	HL_DIFF_DEL,
+	HL_VARIABLE,
+	HL_TAG,
+	HL_ATTRNAME,
+	HL_KEY
 };
 
 enum paneType {
@@ -228,6 +255,12 @@ enum terminalType {
 	TERM_XTERM_256,
 	TERM_TRUECOLOR,
 	TERM_BASIC
+};
+
+enum keyMode {
+	HK_KEYS_VIM,
+	HK_KEYS_EMACS,
+	HK_KEYS_NANO
 };
 
 enum splitDirection {
@@ -254,9 +287,21 @@ struct abuf {
 	int cap;
 };
 
+/* r >= 0: true color. r == HK_COL_DEFAULT: the terminal's own fg/bg (nothing
+   painted). r == HK_COL_ANSI: palette entry g (0-15), the profile's colors.
+   a: HK_A_* attributes that travel with the color into the cell. */
 typedef struct {
 	int r, g, b;
+	int a;
 } Color;
+#define HK_COL_DEFAULT (-2)
+#define HK_COL_ANSI    (-3)
+#define HK_A_BOLD   1
+#define HK_A_ITALIC 2
+#define HK_A_UNDER  4
+#define HK_A_REV    8
+#define HK_A_DIM    16
+#define HK_A_STRIKE 32
 
 typedef struct {
 	char ch[5];
@@ -299,11 +344,20 @@ typedef struct runnerData {
 	int truncated;
 	pthread_mutex_t lock;
 	char cmd[512];
+	int console;               /* :console: a prompt line under the output */
+	char input[512];
+	int input_len, input_cur;
+	char **hist;
+	int hist_n, hist_pos;
+	char cwd[PATH_MAX];
 } runnerData;
 
 #define HK_ROLE_SYSTEM 0
 #define HK_ROLE_USER   1
 #define HK_ROLE_AI     2
+#define HK_ROLE_TOOL   3      /* a tool call, hung off the rail */
+#define HK_ROLE_TOOLOUT 4     /* what it gave back */
+#define HK_ROLE_CONT   0x80   /* a wrapped or later line of the same message */
 
 typedef struct aiData {
 	char **history;
@@ -328,7 +382,14 @@ typedef struct aiData {
 	char perm_tool[64];
 	char perm_kind[16];
 	char perm_subject[1024];
+	int cmd_sel;               /* the command menu over the input */
+	int cmd_hide;              /* esc closed it for this line */
 } aiData;
+
+/* hako's command table, from its init (or a later state) message */
+typedef struct { char n[32]; char p[2]; char c[16]; char a[32]; char d[96]; } hkCmd;
+static hkCmd *hk_cmds;
+static int hk_cmd_n;
 
 typedef struct editorPane {
 	enum paneType type;
@@ -386,16 +447,20 @@ typedef struct {
 	Color border;
 	Color visual_bg;
 	Color visual_fg;
+	Color number;      /* not in the preset table: derived (the string color) */
+	Color err;         /* derived: a red for the background */
 } Theme;
 
 struct editorSyntax {
-	char *filetype;
-	char **filematch;
-	char **keywords;
-	char *singleline_comment_start;
-	char *multiline_comment_start;
-	char *multiline_comment_end;
-	int flags;
+	const char *filetype;
+	const char *const *filematch;    /* ".ext", or a file name ("Makefile", ".bashrc") */
+	const char *const *keywords;     /* "word", "word|" a type, "word!" a constant */
+	const char *slc;                 /* line comment */
+	const char *mcs, *mce;           /* block comment */
+	int flags;                       /* HLF_* */
+	int mode;                        /* HLM_*: a highlighter of its own */
+	const char *quotes;              /* string delimiters; NULL is "\"'" */
+	const char *slc2;                /* a second line comment */
 };
 
 typedef struct {
@@ -444,8 +509,17 @@ struct editorConfig {
 	
 	int in_window_command;
 	int force_window_command;
-	int splash_active;
+	int intro_active;             /* the start screen with no file: gone on the first key */
 	int full_redraw_pending;
+
+	int keymode;                  /* HK_KEYS_VIM (default), HK_KEYS_EMACS, HK_KEYS_NANO */
+	int keymode_forced;           /* --vim / --emacs / --nano: the rc does not change it */
+	int status_line;              /* 0 never, 1 with more than one pane (default), 2 always */
+	int status_shown;             /* drawn this frame */
+	int console_sandbox;          /* the console runs in sandbox-exec / bwrap, or not at all */
+	char *project_rc;             /* ./.hakorc when it was read */
+	char *project_dir;            /* where hake started: the console's sandbox root */
+	char rc_notice[160];          /* a project rc key that was refused */
 
 	int popup_active;
 	char **popup_lines;
@@ -454,6 +528,7 @@ struct editorConfig {
 	int popup_sel;
 	int popup_selectable;
 	int popup_preview;
+	void (*popup_apply)(int sel);  /* a picker of our own: called with the pick on enter */
 	long popup_choice_id;      /* >0: a Rei choice_request awaiting an answer */
 	char popup_title[48];
 	char popup_saved_theme[32];
@@ -464,9 +539,7 @@ struct editorConfig {
 	int grid_w, grid_h;
 
 	char *explorer_name;
-	char *explorer_kanji;
 	char *ai_name;
-	char *ai_kanji;
 
 	int explorer_width;
 	int explorer_show_hidden;
@@ -485,6 +558,8 @@ struct editorConfig {
 	int hako_session_turns;
 	int hako_session_resumed;
 	int hako_protocol;
+	char hako_session_name[64];
+	int hako_remote;
 
 	int auto_indent;
 	int smart_indent;
@@ -556,7 +631,6 @@ void editorScroll(void);
 void editorDrawRows(struct abuf *ab);
 void editorDrawStatusBar(struct abuf *ab);
 void editorDrawMessageBar(struct abuf *ab);
-void editorDrawSplash(void);
 void editorDrawPopup(void);
 void editorPopupOpen(const char *title, const char *const *items, int count,
                      int selectable, int preview);
@@ -574,6 +648,21 @@ int editorGetIndent(erow *row);
 void editorSetMode(enum editorMode mode);
 void editorColonCommand(void);
 static void editorRunColon(char *cmd);
+static void hkOpenPath(const char *path);
+static int explorerOpenInSplit(const char *full_path);
+static int hkFileExists(const char *p);
+static int hkRcSplit(char *line, char **key, char **val);
+static int hkApplyKey(const char *key, const char *val);
+static int hkRcSet(const char *key, const char *val);
+static void hkSaveTheme(const char *name);
+static void hkConfigSet(const char *kv, int persist);
+static void hkAgentSlash(const char *cmd);
+static void hkConsoleToggle(void);
+struct aiData;
+static int hkReiMatches(struct aiData *data, int *out, int max);
+static int hkReiMenuRows(struct editorPane *pane, int n);
+static char *hkExtractJsonString(const char *src, const char *key);
+static char *hkJsonUnescapeDup(const char *s);
 int editorIsInVisualSelection(int row, int col);
 void editorProcessMouse(int x, int y);
 void editorHandleScroll(int direction);
@@ -673,503 +762,1383 @@ int utf8_prev_char(const char *s, int pos);
 } while(0)
 
 /*** syntax highlighting ***/
+#define HLF_NUMBERS   (1 << 0)
+#define HLF_STRINGS   (1 << 1)
+#define HLF_PREPROC   (1 << 2)    /* # directives at the start of a line (C) */
+#define HLF_NOCASE    (1 << 3)    /* keywords in any case (SQL, Dockerfile) */
+#define HLF_TRIPLE    (1 << 4)    /* """ and ''' strings, over lines */
+#define HLF_MLSTR     (1 << 5)    /* a quoted string may run onto the next line */
+#define HLF_SQCHAR    (1 << 6)    /* ' is a char literal, else a lifetime or a prime */
+#define HLF_RAWSQ     (1 << 7)    /* no escapes inside '...' */
+#define HLF_DOLLAR    (1 << 8)    /* $var ${var} $(var) */
+#define HLF_DECOR     (1 << 9)    /* @name: decorators, annotations, ivars */
+#define HLF_NEST      (1 << 10)   /* block comments nest */
+#define HLF_HASHWORD  (1 << 11)   /* the line comment only at the start of a word */
+#define HLF_BACKTICK  (1 << 12)   /* `...` over lines (JS templates, Go raw) */
+#define HLF_RAWBT     (1 << 13)   /* no escapes inside `...` */
+#define HLF_BANG      (1 << 14)   /* name! is a macro (Rust) */
+#define HLF_LUALONG   (1 << 15)   /* [[ ]] and --[[ ]] */
+#define HLF_DASHID    (1 << 16)   /* - is part of a name (CSS, Lisp) */
+#define HLF_SLC_BOL   (1 << 17)   /* line comments only as the first thing on a line */
+#define HLF_JSONKEY   (1 << 18)   /* a string before ':' is a key */
+#define HLF_MCS_BOL   (1 << 19)   /* block comments open at column 0 (Ruby =begin) */
 
-char *C_HL_extensions[] = {".c", ".h", NULL};
-char *C_HL_keywords[] = {
+enum { HLM_CODE, HLM_MARKDOWN, HLM_MARKUP, HLM_DIFF, HLM_CSS, HLM_MAKE, HLM_YAML, HLM_INI };
+
+/* state carried from one line to the next: kind, nesting level, extra */
+enum { ST_NONE, ST_COMMENT, ST_TDQ, ST_TSQ, ST_BT, ST_DQ, ST_SQ, ST_LUASTR, ST_LUACOM,
+       ST_TAG, ST_TAGDQ, ST_TAGSQ };
+#define ST_KIND(st) ((st) & 15)
+#define ST_LVL(st)  (((st) >> 4) & 15)
+#define ST_HI(st)   (((st) >> 8) & 255)
+#define ST_MAKE(k, l, h) ((k) | (((l) & 15) << 4) | (((h) & 255) << 8))
+
+static const char *const C_HL_extensions[] = {".c", ".h", NULL};
+static const char *const C_HL_keywords[] = {
 	"switch", "if", "while", "for", "break", "continue", "return", "else",
 	"goto", "do", "case", "default", "static", "extern", "register", "auto",
-	"inline", "restrict", "struct", "union", "typedef", "enum",
+	"inline", "restrict", "struct", "union", "typedef", "enum", "sizeof",
 	"int|", "long|", "double|", "float|", "char|", "unsigned|", "signed|",
 	"void|", "short|", "size_t|", "ssize_t|", "uint8_t|", "uint16_t|",
 	"uint32_t|", "uint64_t|", "int8_t|", "int16_t|", "int32_t|", "int64_t|",
-	"bool|", "const|", "volatile|",
-	"#define", "#include", "#if", "#ifdef", "#ifndef", "#elif", "#else",
-	"#endif", "#pragma", "NULL", "EOF", "true", "false", NULL
+	"bool|", "_Bool|", "const|", "volatile|", "FILE|", "off_t|", "pid_t|",
+	"NULL!", "EOF!", "true!", "false!", NULL
 };
 
-char *CPP_HL_extensions[] = {".cpp", ".hpp", ".cc", ".cxx", ".C", ".h++", NULL};
-char *CPP_HL_keywords[] = {
-	"class", "public", "private", "protected", "virtual", "override", "final",
-	"namespace", "using", "template", "typename", "try", "catch", "throw",
-	"new", "delete", "this", "friend", "operator", "explicit", "export",
-	"mutable", "noexcept", "constexpr", "nullptr", "decltype",
-	"int|", "long|", "double|", "float|", "char|", "bool|", "void|",
-	"auto|", "const|", "static|", "extern|", "inline|",
-	"std|", "string|", "vector|", "map|", "set|", "unique_ptr|", "shared_ptr|",
-	"true", "false", "nullptr", NULL
+static const char *const CPP_HL_extensions[] = {".cpp", ".hpp", ".cc", ".cxx", ".hh", ".C", ".h++", NULL};
+static const char *const CPP_HL_keywords[] = {
+	"switch", "if", "while", "for", "break", "continue", "return", "else",
+	"goto", "do", "case", "default", "static", "extern", "inline", "struct",
+	"union", "typedef", "enum", "sizeof", "class", "public", "private", "protected",
+	"virtual", "override", "final", "namespace", "using", "template", "typename",
+	"try", "catch", "throw", "new", "delete", "this", "friend", "operator",
+	"explicit", "export", "mutable", "noexcept", "constexpr", "decltype",
+	"static_cast", "dynamic_cast", "reinterpret_cast", "const_cast", "co_await", "co_return",
+	"int|", "long|", "double|", "float|", "char|", "bool|", "void|", "unsigned|",
+	"signed|", "short|", "auto|", "const|", "size_t|", "std|", "string|", "vector|",
+	"map|", "set|", "unique_ptr|", "shared_ptr|",
+	"true!", "false!", "nullptr!", "NULL!", NULL
 };
 
-char *PY_HL_extensions[] = {".py", ".pyw", ".pyi", NULL};
-char *PY_HL_keywords[] = {
+static const char *const PY_HL_extensions[] = {".py", ".pyw", ".pyi", NULL};
+static const char *const PY_HL_keywords[] = {
 	"def", "class", "if", "elif", "else", "while", "for", "in", "try",
 	"except", "finally", "with", "as", "pass", "break", "continue",
-	"print", "return", "yield", "raise", "assert", "import", "from", "lambda",
-	"async", "await", "and", "or", "not", "is", "del",
+	"return", "yield", "raise", "assert", "import", "from", "lambda",
+	"async", "await", "and", "or", "not", "is", "del", "global", "nonlocal",
+	"match", "case",
 	"int|", "float|", "str|", "bool|", "list|", "dict|", "set|", "tuple|",
-	"None|", "True", "False", "__init__", "__name__", "__main__", NULL
+	"bytes|", "object|", "self|", "cls|",
+	"None!", "True!", "False!", NULL
 };
 
-char *JS_HL_extensions[] = {".js", ".jsx", ".mjs", NULL};
-char *JS_HL_keywords[] = {
-	"function", "if", "else", "for", "while", "do", "switch", "case",
+static const char *const JS_HL_extensions[] = {".js", ".jsx", ".mjs", ".cjs", NULL};
+static const char *const JS_HL_keywords[] = {
+	"function", "if", "else", "for", "while", "do", "switch", "case", "default",
 	"break", "continue", "return", "try", "catch", "finally", "throw",
-	"var", "let", "const", "class", "extends", "new", "this",
-	"async", "await", "typeof", "instanceof", "in", "of", "delete",
-	"true", "false", "null", "undefined", "NaN", "Infinity", NULL
+	"var", "let", "const", "class", "extends", "new", "this", "super",
+	"async", "await", "yield", "typeof", "instanceof", "in", "of", "delete",
+	"import", "export", "from", "static", "get", "set", "void",
+	"true!", "false!", "null!", "undefined!", "NaN!", "Infinity!", NULL
 };
 
-char *TS_HL_extensions[] = {".ts", ".tsx", NULL};
-char *TS_HL_keywords[] = {
+static const char *const TS_HL_extensions[] = {".ts", ".tsx", ".mts", ".cts", NULL};
+static const char *const TS_HL_keywords[] = {
+	"function", "if", "else", "for", "while", "do", "switch", "case", "default",
+	"break", "continue", "return", "try", "catch", "finally", "throw",
+	"var", "let", "const", "class", "extends", "new", "this", "super",
+	"async", "await", "yield", "typeof", "instanceof", "in", "of", "delete",
+	"import", "export", "from", "as", "satisfies", "keyof",
 	"interface", "type", "enum", "namespace", "module", "declare",
-	"abstract", "implements", "private", "protected", "public", "readonly",
-	"function", "class", "extends", "import", "export", "async", "await",
-	"string|", "number|", "boolean|", "any|", "void|", "never|", "unknown|",
-	"true", "false", "null", "undefined", NULL
+	"abstract", "implements", "private", "protected", "public", "readonly", "static",
+	"string|", "number|", "boolean|", "any|", "void|", "never|", "unknown|", "object|",
+	"true!", "false!", "null!", "undefined!", NULL
 };
 
-char *JAVA_HL_extensions[] = {".java", NULL};
-char *JAVA_HL_keywords[] = {
-	"class", "interface", "enum", "extends", "implements", "package",
+static const char *const JAVA_HL_extensions[] = {".java", NULL};
+static const char *const JAVA_HL_keywords[] = {
+	"class", "interface", "enum", "record", "extends", "implements", "package",
 	"import", "public", "private", "protected", "static", "final",
-	"abstract", "synchronized", "volatile", "transient",
+	"abstract", "synchronized", "volatile", "transient", "var",
 	"if", "else", "for", "while", "do", "switch", "case", "default",
-	"break", "continue", "return", "try", "catch", "finally", "throw",
+	"break", "continue", "return", "try", "catch", "finally", "throw", "throws",
 	"new", "this", "super", "instanceof",
 	"void|", "boolean|", "byte|", "char|", "short|", "int|", "long|",
-	"float|", "double|", "String|", "true", "false", "null", NULL
+	"float|", "double|", "String|", "true!", "false!", "null!", NULL
 };
 
-char *GO_HL_extensions[] = {".go", NULL};
-char *GO_HL_keywords[] = {
+static const char *const GO_HL_extensions[] = {".go", NULL};
+static const char *const GO_HL_keywords[] = {
 	"func", "package", "import", "var", "const", "type", "struct",
 	"interface", "map", "chan", "if", "else", "for", "range", "switch",
 	"case", "default", "break", "continue", "goto", "return", "defer",
 	"go", "select", "fallthrough",
 	"int|", "int8|", "int16|", "int32|", "int64|", "uint|", "uint8|",
-	"uint16|", "uint32|", "uint64|", "float32|", "float64|", "bool|",
-	"string|", "byte|", "rune|", "error|", "true", "false", "nil", "iota", NULL
+	"uint16|", "uint32|", "uint64|", "uintptr|", "float32|", "float64|", "bool|",
+	"string|", "byte|", "rune|", "error|", "any|", "true!", "false!", "nil!", "iota!", NULL
 };
 
-char *RUST_HL_extensions[] = {".rs", NULL};
-char *RUST_HL_keywords[] = {
+static const char *const RUST_HL_extensions[] = {".rs", NULL};
+static const char *const RUST_HL_keywords[] = {
 	"fn", "let", "mut", "const", "static", "struct", "enum", "trait",
-	"impl", "type", "pub", "use", "mod", "crate", "self", "super",
-	"as", "async", "await", "move", "ref", "unsafe", "where",
+	"impl", "type", "pub", "use", "mod", "crate", "self", "super", "dyn",
+	"as", "async", "await", "move", "ref", "unsafe", "where", "extern", "in",
 	"if", "else", "match", "for", "while", "loop", "break", "continue", "return",
-	"i8|", "i16|", "i32|", "i64|", "i128|", "u8|", "u16|", "u32|", "u64|",
-	"u128|", "f32|", "f64|", "bool|", "char|", "str|", "String|",
-	"true", "false", "Some", "None", "Ok", "Err", NULL
+	"i8|", "i16|", "i32|", "i64|", "i128|", "isize|", "u8|", "u16|", "u32|", "u64|",
+	"u128|", "usize|", "f32|", "f64|", "bool|", "char|", "str|", "String|", "Self|",
+	"Vec|", "Option|", "Result|", "Box|",
+	"true!", "false!", "Some!", "None!", "Ok!", "Err!", NULL
 };
 
-char *RUBY_HL_extensions[] = {".rb", ".rake", ".gemspec", NULL};
-char *RUBY_HL_keywords[] = {
+static const char *const RUBY_HL_extensions[] = {".rb", ".rake", ".gemspec", "Rakefile", "Gemfile", NULL};
+static const char *const RUBY_HL_keywords[] = {
 	"def", "class", "module", "if", "elsif", "else", "unless", "case",
 	"when", "while", "until", "for", "in", "do", "begin", "rescue",
 	"ensure", "end", "return", "yield", "break", "next", "redo", "retry",
-	"require", "include", "extend", "attr_reader", "attr_writer",
-	"attr_accessor", "alias", "super", "self", "nil", "true", "false",
-	"and", "or", "not", "__FILE__", "__LINE__", NULL
+	"require", "require_relative", "include", "extend", "attr_reader", "attr_writer",
+	"attr_accessor", "alias", "super", "self", "then", "lambda", "proc",
+	"and", "or", "not", "nil!", "true!", "false!", "__FILE__!", "__LINE__!", NULL
 };
 
-char *SWIFT_HL_extensions[] = {".swift", NULL};
-char *SWIFT_HL_keywords[] = {
+static const char *const SWIFT_HL_extensions[] = {".swift", NULL};
+static const char *const SWIFT_HL_keywords[] = {
 	"class", "struct", "enum", "protocol", "extension", "func", "var", "let",
-	"if", "else", "switch", "case", "default", "for", "while", "repeat",
+	"if", "else", "switch", "case", "default", "for", "in", "while", "repeat",
 	"break", "continue", "return", "guard", "defer", "do", "try", "catch",
-	"throw", "import", "public", "private", "internal", "static", "final",
+	"throw", "throws", "import", "public", "private", "internal", "static", "final",
 	"lazy", "weak", "unowned", "override", "init", "deinit", "subscript",
-	"typealias", "associatedtype", "where", "some", "any",
+	"typealias", "associatedtype", "where", "some", "any", "async", "await",
 	"Int|", "Double|", "Float|", "Bool|", "String|", "Character|", "Optional|",
-	"Array|", "Dictionary|", "Set|", "Result|",
-	"true", "false", "nil", "self", "super", "Self", NULL
+	"Array|", "Dictionary|", "Set|", "Result|", "Self|",
+	"true!", "false!", "nil!", "self", "super", NULL
 };
 
-char *ASM_HL_extensions[] = {".asm", ".s", ".S", NULL};
-char *ASM_HL_keywords[] = {
-	"mov", "movl", "movq", "movb", "movw", "lea", "push", "pop", "add",
-	"sub", "mul", "div", "inc", "dec", "cmp", "jmp", "je", "jne", "jz",
-	"jnz", "jg", "jge", "jl", "jle", "call", "ret", "nop", "int", "syscall",
-	"and", "or", "xor", "not", "shl", "shr", "sal", "sar", "test",
-	"eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
-	"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
-	"r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-	"al", "bl", "cl", "dl", "ah", "bh", "ch", "dh",
-	"section", "global", "extern", "db", "dw", "dd", "dq", "resb", "resw", "resd", "resq", NULL
-};
-
-char *ARM_HL_extensions[] = {".arm", ".s", NULL};
-char *ARM_HL_keywords[] = {
-	"add", "sub", "mul", "div", "and", "or", "xor", "not", "lsl", "lsr",
-	"asr", "ror", "cmp", "tst", "teq", "mov", "mvn", "ldr", "str", "ldm",
-	"stm", "push", "pop", "b", "bl", "bx", "beq", "bne", "bcs", "bcc",
-	"bmi", "bpl", "bvs", "bvc", "bhi", "bls", "bge", "blt", "bgt", "ble",
-	"r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10",
-	"r11", "r12", "r13", "r14", "r15", "sp", "lr", "pc", "cpsr", "spsr", NULL
-};
-
-char *MIPS_HL_extensions[] = {".mips", ".s", NULL};
-char *MIPS_HL_keywords[] = {
-	"add", "addi", "sub", "mul", "div", "and", "andi", "or", "ori", "xor",
-	"nor", "sll", "srl", "sra", "slt", "slti", "beq", "bne", "j", "jal",
-	"jr", "lw", "sw", "lb", "sb", "lh", "sh", "lui", "mfhi", "mflo", "mthi",
-	"mtlo", "syscall", "nop",
-	"$zero", "$at", "$v0", "$v1", "$a0", "$a1", "$a2", "$a3",
-	"$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7",
-	"$s0", "$s1", "$s2", "$s3", "$s4", "$s5", "$s6", "$s7",
-	"$t8", "$t9", "$k0", "$k1", "$gp", "$sp", "$fp", "$ra", NULL
-};
-
-char *SQL_HL_extensions[] = {".sql", NULL};
-char *SQL_HL_keywords[] = {
-	"SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "CREATE",
-	"ALTER", "DROP", "TABLE", "DATABASE", "INDEX", "VIEW", "PROCEDURE",
-	"JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "ON", "AS",
-	"GROUP", "BY", "HAVING", "ORDER", "ASC", "DESC", "LIMIT", "OFFSET",
-	"UNION", "INTERSECT", "EXCEPT", "AND", "OR", "NOT", "IN", "EXISTS",
-	"BETWEEN", "LIKE", "IS", "NULL", "DISTINCT", "COUNT", "SUM", "AVG",
-	"MIN", "MAX", "CASE", "WHEN", "THEN", "ELSE", "END",
-	"INT|", "VARCHAR|", "TEXT|", "DATE|", "TIMESTAMP|", "BOOLEAN|", "FLOAT|",
-	"PRIMARY", "KEY", "FOREIGN", "REFERENCES", "UNIQUE", "DEFAULT", NULL
-};
-
-char *PHP_HL_extensions[] = {".php", ".phtml", NULL};
-char *PHP_HL_keywords[] = {
-	"class", "function", "public", "private", "protected", "static",
-	"if", "elseif", "else", "while", "for", "foreach", "switch", "case",
+static const char *const PHP_HL_extensions[] = {".php", ".phtml", NULL};
+static const char *const PHP_HL_keywords[] = {
+	"class", "function", "fn", "public", "private", "protected", "static",
+	"if", "elseif", "else", "while", "for", "foreach", "switch", "case", "match",
 	"break", "continue", "return", "try", "catch", "finally", "throw",
 	"new", "extends", "implements", "interface", "abstract", "trait",
-	"namespace", "use", "as", "const", "var", "global",
-	"int|", "float|", "string|", "bool|", "array|", "object|", "null|",
-	"true", "false", "null", "$this", "echo", "print", "die", "exit", NULL
+	"namespace", "use", "as", "const", "var", "global", "echo", "print", "require",
+	"require_once", "include", "include_once",
+	"int|", "float|", "string|", "bool|", "array|", "object|", "mixed|", "void|",
+	"true!", "false!", "null!", "TRUE!", "FALSE!", "NULL!", NULL
 };
 
-char *KOTLIN_HL_extensions[] = {".kt", ".kts", NULL};
-char *KOTLIN_HL_keywords[] = {
+static const char *const KOTLIN_HL_extensions[] = {".kt", ".kts", NULL};
+static const char *const KOTLIN_HL_keywords[] = {
 	"class", "interface", "fun", "object", "val", "var", "package", "import",
 	"if", "else", "when", "for", "while", "do", "break", "continue", "return",
 	"try", "catch", "finally", "throw", "public", "private", "protected",
-	"internal", "open", "final", "abstract", "data", "sealed", "companion",
+	"internal", "open", "final", "abstract", "data", "sealed", "companion", "in", "is", "as",
 	"Int|", "Long|", "Double|", "Float|", "Boolean|", "String|", "Char|",
-	"Byte|", "Short|", "Any|", "Unit|", "Nothing|", "true", "false", "null", NULL
+	"Byte|", "Short|", "Any|", "Unit|", "Nothing|", "true!", "false!", "null!", NULL
 };
 
-char *CS_HL_extensions[] = {".cs", NULL};
-char *CS_HL_keywords[] = {
-	"class", "struct", "interface", "enum", "namespace", "using", "public",
-	"private", "protected", "internal", "static", "void", "if", "else",
-	"switch", "case", "default", "for", "foreach", "while", "do", "break",
+static const char *const CS_HL_extensions[] = {".cs", NULL};
+static const char *const CS_HL_keywords[] = {
+	"class", "struct", "interface", "enum", "record", "namespace", "using", "public",
+	"private", "protected", "internal", "static", "readonly", "const", "if", "else",
+	"switch", "case", "default", "for", "foreach", "in", "while", "do", "break",
 	"continue", "return", "try", "catch", "finally", "throw", "new", "this",
-	"base", "virtual", "override", "abstract", "sealed", "async", "await",
-	"bool|", "byte|", "char|", "decimal|", "double|", "float|", "int|",
+	"base", "virtual", "override", "abstract", "sealed", "async", "await", "var",
+	"void|", "bool|", "byte|", "char|", "decimal|", "double|", "float|", "int|",
 	"long|", "object|", "sbyte|", "short|", "string|", "uint|", "ulong|",
-	"ushort|", "true", "false", "null", NULL
+	"ushort|", "true!", "false!", "null!", NULL
 };
 
-char *LUA_HL_extensions[] = {".lua", NULL};
-char *LUA_HL_keywords[] = {
-	"and", "break", "do", "else", "elseif", "end", "false", "for",
-	"function", "if", "in", "local", "nil", "not", "or", "repeat",
-	"return", "then", "true", "until", "while", "goto",
-	"assert", "collectgarbage", "dofile", "error", "getmetatable",
-	"ipairs", "load", "loadfile", "next", "pairs", "pcall", "print",
-	"rawequal", "rawget", "rawset", "require", "select", "setmetatable",
-	"tonumber", "tostring", "type", "xpcall", "_G", "_VERSION", NULL
+static const char *const SCALA_HL_extensions[] = {".scala", ".sc", NULL};
+static const char *const SCALA_HL_keywords[] = {
+	"class", "object", "trait", "extends", "with", "def", "val", "var", "given", "using",
+	"if", "else", "then", "match", "case", "for", "while", "do", "try", "catch",
+	"finally", "throw", "return", "import", "package", "private", "protected",
+	"public", "abstract", "final", "sealed", "implicit", "lazy", "override", "new", "yield",
+	"Int|", "Long|", "Double|", "Float|", "Boolean|", "String|", "Char|",
+	"Byte|", "Short|", "Any|", "Unit|", "Nothing|", "true!", "false!", "null!", NULL
 };
 
-char *SHELL_HL_extensions[] = {".sh", ".bash", ".zsh", ".fish", NULL};
-char *SHELL_HL_keywords[] = {
-	"if", "then", "else", "elif", "fi", "for", "while", "do", "done",
-	"case", "esac", "function", "return", "break", "continue", "exit",
-	"export", "source", "alias", "unalias", "shift", "local", "declare",
-	"echo", "printf", "read", "cd", "pwd", "ls", "cp", "mv", "rm", "mkdir",
-	"rmdir", "touch", "cat", "grep", "sed", "awk", "find", "chmod", "chown",
-	"ps", "kill", "bg", "fg", "jobs", "test", "[", "]", "true", "false", NULL
+static const char *const LUA_HL_extensions[] = {".lua", NULL};
+static const char *const LUA_HL_keywords[] = {
+	"and", "break", "do", "else", "elseif", "end", "for",
+	"function", "if", "in", "local", "not", "or", "repeat",
+	"return", "then", "until", "while", "goto",
+	"self|", "_G|", "_ENV|", "true!", "false!", "nil!", NULL
 };
 
-char *ELIXIR_HL_extensions[] = {".ex", ".exs", NULL};
-char *ELIXIR_HL_keywords[] = {
-	"def", "defp", "defmodule", "defprotocol", "defmacro", "defmacrop",
-	"defdelegate", "defexception", "defstruct", "defimpl", "defcallback",
-	"do", "end", "when", "and", "or", "not", "in", "if", "unless", "else",
-	"case", "cond", "try", "catch", "rescue", "raise", "throw", "after",
-	"receive", "send", "spawn", "spawn_link", "import", "require", "use",
-	"alias", "nil", "true", "false", "__MODULE__", "__FILE__", "__DIR__",
-	"__ENV__", "__CALLER__", NULL
+static const char *const SHELL_HL_extensions[] = {".sh", ".bash", ".zsh", ".ksh", ".fish",
+	".bashrc", ".zshrc", ".profile", ".bash_profile", ".zprofile", NULL};
+static const char *const SHELL_HL_keywords[] = {
+	"if", "then", "else", "elif", "fi", "for", "in", "while", "until", "do", "done",
+	"case", "esac", "function", "select",
+	"return|", "break|", "continue|", "exit|", "export|", "source|", "alias|", "unalias|",
+	"shift|", "local|", "declare|", "readonly|", "typeset|", "set|", "unset|", "trap|",
+	"eval|", "exec|", "echo|", "printf|", "read|", "cd|", "test|", "true!", "false!", NULL
 };
 
-char *HASKELL_HL_extensions[] = {".hs", ".lhs", NULL};
-char *HASKELL_HL_keywords[] = {
-	"module", "import", "qualified", "as", "hiding", "where", "data",
-	"type", "newtype", "class", "instance", "deriving", "let", "in",
-	"if", "then", "else", "case", "of", "do", "return", "infixl",
-	"infixr", "infix", "forall", "foreign", "export", "dynamic",
-	"safe", "unsafe", "threadsafe", "stdcall", "ccall",
-	"Int|", "Integer|", "Float|", "Double|", "Char|", "String|", "Bool|",
-	"Maybe|", "Either|", "IO|", "True", "False", "Nothing", "Just",
-	"Left", "Right", "LT", "EQ", "GT", NULL
+static const char *const SQL_HL_extensions[] = {".sql", NULL};
+static const char *const SQL_HL_keywords[] = {
+	"SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE", "CREATE",
+	"ALTER", "DROP", "TABLE", "DATABASE", "INDEX", "VIEW", "PROCEDURE", "TRIGGER",
+	"JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "ON", "AS", "USING",
+	"GROUP", "BY", "HAVING", "ORDER", "ASC", "DESC", "LIMIT", "OFFSET", "WITH",
+	"UNION", "INTERSECT", "EXCEPT", "ALL", "AND", "OR", "NOT", "IN", "EXISTS",
+	"BETWEEN", "LIKE", "IS", "DISTINCT", "CASE", "WHEN", "THEN", "ELSE", "END",
+	"PRIMARY", "KEY", "FOREIGN", "REFERENCES", "UNIQUE", "DEFAULT", "CHECK", "BEGIN", "COMMIT",
+	"INT|", "INTEGER|", "BIGINT|", "VARCHAR|", "CHAR|", "TEXT|", "DATE|", "TIMESTAMP|",
+	"BOOLEAN|", "FLOAT|", "REAL|", "NUMERIC|", "BLOB|",
+	"NULL!", "TRUE!", "FALSE!", NULL
 };
 
-char *CLOJURE_HL_extensions[] = {".clj", ".cljs", ".cljc", NULL};
-char *CLOJURE_HL_keywords[] = {
-	"def", "defn", "defn-", "defmacro", "defmulti", "defmethod", "defonce",
-	"declare", "ns", "in-ns", "import", "use", "require", "load", "compile",
-	"let", "letfn", "binding", "if", "if-not", "when", "when-not", "cond",
-	"case", "and", "or", "not", "do", "doto", "loop", "recur", "for",
-	"doseq", "dotimes", "while", "try", "catch", "finally", "throw",
-	"nil", "true", "false", NULL
-};
-
-char *DART_HL_extensions[] = {".dart", NULL};
-char *DART_HL_keywords[] = {
-	"abstract", "as", "assert", "async", "await", "break", "case", "catch",
-	"class", "const", "continue", "default", "deferred", "do", "dynamic",
-	"else", "enum", "export", "extends", "external", "factory", "false",
-	"final", "finally", "for", "get", "if", "implements", "import", "in",
-	"is", "library", "new", "null", "operator", "part", "rethrow", "return",
-	"set", "static", "super", "switch", "sync", "this", "throw", "true",
-	"try", "typedef", "var", "void", "while", "with", "yield",
-	"int|", "double|", "num|", "String|", "bool|", "List|", "Map|", "Set|", NULL
-};
-
-char *JULIA_HL_extensions[] = {".jl", NULL};
-char *JULIA_HL_keywords[] = {
-	"abstract", "baremodule", "begin", "break", "catch", "const", "continue",
-	"do", "else", "elseif", "end", "export", "false", "finally", "for",
-	"function", "global", "if", "import", "let", "local", "macro", "module",
-	"quote", "return", "struct", "true", "try", "using", "while", "where",
-	"in", "isa", "mutable", "primitive", "type",
-	"Int|", "Int8|", "Int16|", "Int32|", "Int64|", "Int128|", "UInt|",
-	"UInt8|", "UInt16|", "UInt32|", "UInt64|", "UInt128|", "Float16|",
-	"Float32|", "Float64|", "Bool|", "Char|", "String|", "Any|", "Union|",
-	"Nothing|", "nothing", "missing", "Inf", "NaN", NULL
-};
-
-char *ZIG_HL_extensions[] = {".zig", NULL};
-char *ZIG_HL_keywords[] = {
-	"const", "var", "fn", "pub", "extern", "export", "inline", "comptime",
-	"if", "else", "switch", "and", "or", "while", "for", "break", "continue",
-	"return", "defer", "errdefer", "try", "catch", "orelse", "async", "await",
-	"suspend", "resume", "cancel", "struct", "union", "enum", "error",
-	"packed", "opaque", "test", "usingnamespace", "asm", "volatile",
-	"i8|", "u8|", "i16|", "u16|", "i32|", "u32|", "i64|", "u64|", "i128|",
-	"u128|", "isize|", "usize|", "f16|", "f32|", "f64|", "f128|", "bool|",
-	"void|", "noreturn|", "type|", "anyerror|", "comptime_int|",
-	"comptime_float|", "true", "false", "null", "undefined", NULL
-};
-
-char *NIM_HL_extensions[] = {".nim", ".nims", NULL};
-char *NIM_HL_keywords[] = {
-	"proc", "func", "method", "iterator", "template", "macro", "converter",
-	"var", "let", "const", "type", "object", "tuple", "enum", "ref", "ptr",
-	"if", "elif", "else", "when", "case", "of", "while", "for", "break",
-	"continue", "return", "yield", "block", "try", "except", "finally",
-	"raise", "defer", "import", "include", "from", "export", "as", "using",
-	"int|", "int8|", "int16|", "int32|", "int64|", "uint|", "uint8|",
-	"uint16|", "uint32|", "uint64|", "float|", "float32|", "float64|",
-	"bool|", "char|", "string|", "seq|", "array|", "openarray|", "void|",
-	"auto|", "any|", "true", "false", "nil", NULL
-};
-
-char *OCAML_HL_extensions[] = {".ml", ".mli", NULL};
-char *OCAML_HL_keywords[] = {
-	"let", "rec", "in", "fun", "function", "if", "then", "else", "match",
-	"with", "when", "try", "raise", "begin", "end", "for", "to", "downto",
-	"while", "do", "done", "ref", "mutable", "type", "of", "module",
-	"struct", "sig", "functor", "val", "open", "include", "exception",
-	"class", "object", "method", "inherit", "virtual", "private", "new",
-	"int|", "float|", "bool|", "char|", "string|", "unit|", "list|",
-	"array|", "option|", "ref|", "true", "false", "()", "[]", NULL
-};
-
-char *FSHARP_HL_extensions[] = {".fs", ".fsi", ".fsx", NULL};
-char *FSHARP_HL_keywords[] = {
-	"let", "rec", "mutable", "fun", "function", "if", "then", "else",
-	"elif", "match", "with", "when", "try", "finally", "for", "to",
-	"downto", "while", "do", "yield", "return", "use", "using", "new",
-	"type", "of", "module", "namespace", "open", "import", "export",
-	"public", "private", "internal", "static", "member", "val", "inherit",
-	"abstract", "interface", "class", "struct", "exception",
-	"int|", "float|", "bool|", "char|", "string|", "unit|", "list|",
-	"array|", "seq|", "option|", "async|", "true", "false", "null", "()", NULL
-};
-
-char *R_HL_extensions[] = {".r", ".R", NULL};
-char *R_HL_keywords[] = {
-	"if", "else", "repeat", "while", "function", "for", "in", "next",
-	"break", "TRUE", "FALSE", "NULL", "Inf", "NaN", "NA", "return",
-	"invisible", "stop", "warning", "message", "library", "require",
-	"source", "install.packages", "data.frame", "matrix", "array", "list",
-	"vector", "factor", "character", "numeric", "integer", "logical",
-	"complex", "as.numeric", "as.character", "as.logical", "as.factor",
-	"length", "dim", "nrow", "ncol", "head", "tail", "summary", "str", NULL
-};
-
-char *PERL_HL_extensions[] = {".pl", ".pm", NULL};
-char *PERL_HL_keywords[] = {
+static const char *const PERL_HL_extensions[] = {".pl", ".pm", NULL};
+static const char *const PERL_HL_keywords[] = {
 	"if", "elsif", "else", "unless", "while", "until", "for", "foreach",
 	"do", "sub", "package", "use", "require", "my", "our", "local", "state",
-	"given", "when", "default", "continue", "break", "return", "last", "next",
-	"redo", "goto", "eval", "BEGIN", "END", "print", "printf", "say",
-	"open", "close", "read", "write", "seek", "tell", "eof", "binmode",
-	"undef", "defined", "ref", "bless", "tie", "untie", "tied", "scalar",
-	"@", "$", "%", "&", "*", NULL
+	"given", "when", "default", "return", "last", "next", "redo", "goto", "eval",
+	"BEGIN", "END", "print", "printf", "say", "die", "undef!", NULL
 };
 
-char *SCALA_HL_extensions[] = {".scala", ".sc", NULL};
-char *SCALA_HL_keywords[] = {
-	"class", "object", "trait", "extends", "with", "def", "val", "var",
-	"if", "else", "match", "case", "for", "while", "do", "try", "catch",
-	"finally", "throw", "return", "import", "package", "private", "protected",
-	"public", "abstract", "final", "sealed", "implicit", "lazy", "override",
-	"Int|", "Long|", "Double|", "Float|", "Boolean|", "String|", "Char|",
-	"Byte|", "Short|", "Any|", "Unit|", "Nothing|", "true", "false", "null", NULL
+static const char *const R_HL_extensions[] = {".r", ".R", NULL};
+static const char *const R_HL_keywords[] = {
+	"if", "else", "repeat", "while", "function", "for", "in", "next", "break",
+	"return", "library", "require", "source",
+	"TRUE!", "FALSE!", "NULL!", "Inf!", "NaN!", "NA!", NULL
 };
 
-char *HTML_HL_extensions[] = {".html", ".htm", ".xhtml", NULL};
-char *HTML_HL_keywords[] = {
-	"html", "head", "title", "body", "div", "span", "p", "a", "img",
-	"ul", "ol", "li", "table", "tr", "td", "th", "form", "input",
-	"button", "select", "option", "textarea", "label", "header", "footer",
-	"nav", "section", "article", "aside", "main", "h1", "h2", "h3",
-	"h4", "h5", "h6", "br", "hr", "link", "meta", "script", "style",
-	"class", "id", "href", "src", "alt", "width", "height", "style",
-	"type", "name", "value", "placeholder", "required", "disabled", NULL
+static const char *const ELIXIR_HL_extensions[] = {".ex", ".exs", NULL};
+static const char *const ELIXIR_HL_keywords[] = {
+	"def", "defp", "defmodule", "defprotocol", "defmacro", "defmacrop",
+	"defdelegate", "defexception", "defstruct", "defimpl",
+	"do", "end", "when", "and", "or", "not", "in", "if", "unless", "else",
+	"case", "cond", "try", "catch", "rescue", "raise", "throw", "after",
+	"receive", "fn", "import", "require", "use", "alias", "with",
+	"nil!", "true!", "false!", "__MODULE__!", NULL
 };
 
-char *CSS_HL_extensions[] = {".css", ".scss", ".sass", ".less", NULL};
-char *CSS_HL_keywords[] = {
-	"color", "background", "background-color", "border", "margin", "padding",
-	"width", "height", "display", "position", "top", "right", "bottom", "left",
-	"float", "clear", "font", "font-size", "font-family", "font-weight",
-	"text-align", "text-decoration", "line-height", "z-index", "opacity",
-	"visibility", "overflow", "cursor", "flex", "grid", "transform",
-	"transition", "animation", "box-shadow", "border-radius",
-	"absolute", "relative", "fixed", "static", "block", "inline", "none",
-	"auto", "inherit", "initial", "px", "em", "rem", "%", "vh", "vw", NULL
+static const char *const HASKELL_HL_extensions[] = {".hs", ".lhs", NULL};
+static const char *const HASKELL_HL_keywords[] = {
+	"module", "import", "qualified", "as", "hiding", "where", "data",
+	"type", "newtype", "class", "instance", "deriving", "let", "in",
+	"if", "then", "else", "case", "of", "do", "infixl", "infixr", "infix", "forall",
+	"Int|", "Integer|", "Float|", "Double|", "Char|", "String|", "Bool|",
+	"Maybe|", "Either|", "IO|", "True!", "False!", "Nothing!", "Just!", NULL
 };
 
-char *MD_HL_extensions[] = {".md", ".markdown", NULL};
-char *MD_HL_keywords[] = {
-	"#", "##", "###", "####", "#####", "######", "*", "**", "_", "__",
-	"-", "+", "1.", "2.", "3.", "[", "]", "(", ")", "![", ">", "`",
-	"```", "~~~", "---", "***", "___", "|", NULL
+static const char *const CLOJURE_HL_extensions[] = {".clj", ".cljs", ".cljc", ".edn", NULL};
+static const char *const CLOJURE_HL_keywords[] = {
+	"def", "defn", "defn-", "defmacro", "defmulti", "defmethod", "defonce",
+	"declare", "ns", "fn", "let", "letfn", "binding", "if", "if-not", "when", "when-not",
+	"cond", "case", "and", "or", "not", "do", "doto", "loop", "recur", "for",
+	"doseq", "dotimes", "while", "try", "catch", "finally", "throw",
+	"nil!", "true!", "false!", NULL
 };
 
-char *YAML_HL_extensions[] = {".yml", ".yaml", NULL};
-char *YAML_HL_keywords[] = {
-	"true", "false", "null", "True", "False", "Null", "TRUE", "FALSE",
-	"NULL", "yes", "no", "Yes", "No", "YES", "NO", "on", "off", "On",
-	"Off", "ON", "OFF", NULL
+static const char *const DART_HL_extensions[] = {".dart", NULL};
+static const char *const DART_HL_keywords[] = {
+	"abstract", "as", "assert", "async", "await", "break", "case", "catch",
+	"class", "const", "continue", "default", "do", "else", "enum", "export",
+	"extends", "factory", "final", "finally", "for", "if", "implements", "import",
+	"in", "is", "late", "library", "mixin", "new", "required", "return", "static",
+	"super", "switch", "this", "throw", "try", "var", "while", "with", "yield",
+	"void|", "dynamic|", "int|", "double|", "num|", "String|", "bool|", "List|", "Map|", "Set|",
+	"true!", "false!", "null!", NULL
 };
 
-char *JSON_HL_extensions[] = {".json", ".jsonc", NULL};
-char *JSON_HL_keywords[] = {
-	"true", "false", "null", NULL
+static const char *const JULIA_HL_extensions[] = {".jl", NULL};
+static const char *const JULIA_HL_keywords[] = {
+	"abstract", "baremodule", "begin", "break", "catch", "const", "continue",
+	"do", "else", "elseif", "end", "export", "finally", "for",
+	"function", "global", "if", "import", "let", "local", "macro", "module",
+	"quote", "return", "struct", "try", "using", "while", "where", "in", "isa", "mutable",
+	"Int|", "Int64|", "UInt8|", "Float64|", "Bool|", "Char|", "String|", "Any|", "Vector|",
+	"true!", "false!", "nothing!", "missing!", "Inf!", "NaN!", NULL
 };
 
-char *XML_HL_extensions[] = {".xml", ".svg", ".xsl", ".xslt", NULL};
-char *XML_HL_keywords[] = {
-	"xml", "version", "encoding", "xmlns", "xsi", "schemaLocation",
-	"id", "class", "style", "href", "src", "type", "name", "value", NULL
+static const char *const ZIG_HL_extensions[] = {".zig", NULL};
+static const char *const ZIG_HL_keywords[] = {
+	"const", "var", "fn", "pub", "extern", "export", "inline", "comptime",
+	"if", "else", "switch", "and", "or", "while", "for", "break", "continue",
+	"return", "defer", "errdefer", "try", "catch", "orelse", "struct", "union", "enum",
+	"error", "packed", "opaque", "test", "usingnamespace", "asm", "volatile",
+	"i8|", "u8|", "i16|", "u16|", "i32|", "u32|", "i64|", "u64|", "i128|",
+	"u128|", "isize|", "usize|", "f16|", "f32|", "f64|", "bool|", "void|",
+	"noreturn|", "type|", "anyerror|", "anytype|", "true!", "false!", "null!", "undefined!", NULL
 };
 
-char *DOCKER_HL_extensions[] = {"Dockerfile", ".dockerfile", NULL};
-char *DOCKER_HL_keywords[] = {
-	"FROM", "RUN", "CMD", "LABEL", "EXPOSE", "ENV", "ADD", "COPY",
-	"ENTRYPOINT", "VOLUME", "USER", "WORKDIR", "ARG", "ONBUILD",
-	"STOPSIGNAL", "HEALTHCHECK", "SHELL", "MAINTAINER", NULL
+static const char *const NIM_HL_extensions[] = {".nim", ".nims", NULL};
+static const char *const NIM_HL_keywords[] = {
+	"proc", "func", "method", "iterator", "template", "macro", "converter",
+	"var", "let", "const", "type", "object", "tuple", "enum", "ref", "ptr",
+	"if", "elif", "else", "when", "case", "of", "while", "for", "in", "break",
+	"continue", "return", "yield", "block", "try", "except", "finally",
+	"raise", "defer", "import", "include", "from", "export", "as", "and", "or", "not",
+	"int|", "float|", "bool|", "char|", "string|", "seq|", "array|", "void|",
+	"true!", "false!", "nil!", NULL
 };
 
-char *MAKE_HL_extensions[] = {"Makefile", "makefile", ".mk", NULL};
-char *MAKE_HL_keywords[] = {
-	"ifeq", "ifneq", "ifdef", "ifndef", "else", "endif", "include",
-	"define", "endef", "override", "export", "unexport", "vpath",
-	".PHONY", ".SUFFIXES", ".DEFAULT", ".PRECIOUS", ".INTERMEDIATE",
-	".SECONDARY", ".SECONDEXPANSION", ".DELETE_ON_ERROR", ".IGNORE",
-	".LOW_RESOLUTION_TIME", ".SILENT", ".EXPORT_ALL_VARIABLES",
-	".NOTPARALLEL", ".ONESHELL", ".POSIX", NULL
+static const char *const OCAML_HL_extensions[] = {".ml", ".mli", NULL};
+static const char *const OCAML_HL_keywords[] = {
+	"let", "rec", "in", "fun", "function", "if", "then", "else", "match",
+	"with", "when", "try", "raise", "begin", "end", "for", "to", "downto",
+	"while", "do", "done", "mutable", "type", "of", "module", "and",
+	"struct", "sig", "functor", "val", "open", "include", "exception",
+	"int|", "float|", "bool|", "char|", "string|", "unit|", "list|",
+	"array|", "option|", "true!", "false!", NULL
 };
 
-char *VIM_HL_extensions[] = {".vim", ".vimrc", NULL};
-char *VIM_HL_keywords[] = {
+static const char *const FSHARP_HL_extensions[] = {".fs", ".fsi", ".fsx", NULL};
+static const char *const FSHARP_HL_keywords[] = {
+	"let", "rec", "mutable", "fun", "function", "if", "then", "else",
+	"elif", "match", "with", "when", "try", "finally", "for", "to", "in",
+	"downto", "while", "do", "yield", "return", "use", "new",
+	"type", "of", "module", "namespace", "open", "member", "val", "inherit",
+	"abstract", "interface", "class", "struct", "exception",
+	"int|", "float|", "bool|", "char|", "string|", "unit|", "list|",
+	"array|", "seq|", "option|", "true!", "false!", "null!", NULL
+};
+
+static const char *const ASM_HL_extensions[] = {".asm", ".s", ".S", ".nasm", NULL};
+static const char *const ASM_HL_keywords[] = {
+	"mov", "movl", "movq", "movb", "movw", "lea", "push", "pop", "add",
+	"sub", "mul", "imul", "div", "inc", "dec", "cmp", "jmp", "je", "jne", "jz",
+	"jnz", "jg", "jge", "jl", "jle", "call", "ret", "nop", "int", "syscall",
+	"and", "or", "xor", "not", "shl", "shr", "sal", "sar", "test",
+	"eax|", "ebx|", "ecx|", "edx|", "esi|", "edi|", "esp|", "ebp|",
+	"rax|", "rbx|", "rcx|", "rdx|", "rsi|", "rdi|", "rsp|", "rbp|",
+	"r8|", "r9|", "r10|", "r11|", "r12|", "r13|", "r14|", "r15|",
+	"section", "global", "extern", "db", "dw", "dd", "dq", "resb", "resw", "resd", "resq", NULL
+};
+
+static const char *const VIM_HL_extensions[] = {".vim", ".vimrc", NULL};
+static const char *const VIM_HL_keywords[] = {
 	"if", "else", "elseif", "endif", "for", "endfor", "while", "endwhile",
 	"function", "endfunction", "return", "call", "let", "set", "execute",
 	"normal", "command", "autocmd", "augroup", "map", "nmap", "vmap",
 	"imap", "noremap", "nnoremap", "vnoremap", "inoremap", "syntax",
-	"highlight", "colorscheme", "source", "runtime", "echo", "echom",
-	"silent", "vertical", "split", "vsplit", "tabnew", "buffer", "bnext",
-	"bprevious", "bdelete", "write", "quit", "wq", "edit", NULL
+	"highlight", "colorscheme", "source", "runtime", "echo", "echom", NULL
 };
 
-char *TOML_HL_extensions[] = {".toml", NULL};
-char *TOML_HL_keywords[] = {
-	"true", "false", NULL
+static const char *const HTML_HL_extensions[] = {".html", ".htm", ".xhtml", NULL};
+static const char *const XML_HL_extensions[] = {".xml", ".svg", ".xsl", ".xslt", ".plist", NULL};
+static const char *const CSS_HL_extensions[] = {".css", NULL};
+static const char *const SCSS_HL_extensions[] = {".scss", ".sass", ".less", NULL};
+static const char *const CSS_HL_keywords[] = {
+	"none!", "auto!", "inherit!", "initial!", "unset!", "important", "solid!", "block!",
+	"inline!", "flex!", "grid!", "absolute!", "relative!", "fixed!", "sticky!", "hidden!",
+	"transparent!", NULL
 };
-
-char *HAKE_HL_extensions[] = {".hakorc", "hakorc", NULL};
-char *HAKE_HL_keywords[] = {
-	"tab_stop", "use_tabs", "word_wrap",
-	"show_line_numbers", "max_undo_levels", "explorer_enabled",
-	"explorer_width", "explorer_show_hidden", "show_splash", "mode",
-	"theme", "theme_dark", "theme_light", "theme_solarized", "theme_gruvbox",
-	"theme_monokai", "theme_nord", "theme_dracula",
-	"theme_bg", "theme_fg", "theme_comment", "theme_keyword1",
-	"theme_keyword2", "theme_string", "theme_number", "theme_match",
-	"theme_preprocessor", "theme_function", "theme_type", "theme_operator",
-	"theme_bracket", "theme_line_number", "theme_status_bg", "theme_status_fg",
-	"theme_border", "theme_visual_bg", "theme_visual_fg",
-	"auto_indent", "smart_indent", "mouse", "mouse_enabled", "scroll_speed",
-	"relative_numbers", "true", "false", "normal", "insert", "1", "0", NULL
+static const char *const MD_HL_extensions[] = {".md", ".markdown", ".mdown", ".mkd", NULL};
+static const char *const YAML_HL_extensions[] = {".yml", ".yaml", NULL};
+static const char *const YAML_HL_keywords[] = {
+	"true!", "false!", "null!", "True!", "False!", "Null!", "TRUE!", "FALSE!",
+	"NULL!", "yes!", "no!", "Yes!", "No!", "on!", "off!", "On!", "Off!", NULL
 };
+static const char *const JSON_HL_extensions[] = {".json", ".geojson", ".webmanifest", NULL};
+static const char *const JSONC_HL_extensions[] = {".jsonc", ".json5", NULL};
+static const char *const JSON_HL_keywords[] = {"true!", "false!", "null!", NULL};
+static const char *const DOCKER_HL_extensions[] = {"Dockerfile", "Containerfile", ".dockerfile", NULL};
+static const char *const DOCKER_HL_keywords[] = {
+	"FROM", "RUN", "CMD", "LABEL", "EXPOSE", "ENV", "ADD", "COPY",
+	"ENTRYPOINT", "VOLUME", "USER", "WORKDIR", "ARG", "ONBUILD",
+	"STOPSIGNAL", "HEALTHCHECK", "SHELL", "MAINTAINER", "AS", NULL
+};
+static const char *const MAKE_HL_extensions[] = {"Makefile", "makefile", "GNUmakefile", ".mk", ".mak", NULL};
+static const char *const MAKE_HL_keywords[] = {
+	"ifeq", "ifneq", "ifdef", "ifndef", "else", "endif", "include", "-include",
+	"define", "endef", "override", "export", "unexport", "vpath",
+	".PHONY", ".SUFFIXES", ".DEFAULT", ".PRECIOUS", ".INTERMEDIATE",
+	".SECONDARY", ".DELETE_ON_ERROR", ".SILENT", ".ONESHELL", ".POSIX", NULL
+};
+static const char *const TOML_HL_extensions[] = {".toml", NULL};
+static const char *const INI_HL_extensions[] = {".ini", ".cfg", ".conf", ".editorconfig", ".gitconfig",
+	".gitignore", ".gitattributes", ".npmrc", ".env", NULL};
+static const char *const BOOL_HL_keywords[] = {"true!", "false!", NULL};
+static const char *const HAKE_HL_extensions[] = {".hakorc", "hakorc", NULL};
+static const char *const DIFF_HL_extensions[] = {".diff", ".patch", NULL};
+static const char *const NONE_HL[] = {NULL};
 
-char *DEFAULT_HL_extensions[] = {NULL};
-char *DEFAULT_HL_keywords[] = {NULL};
-
+#define C_LIKE  (HLF_NUMBERS | HLF_STRINGS)
 struct editorSyntax HLDB[] = {
-	{"c", C_HL_extensions, C_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"c++", CPP_HL_extensions, CPP_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"python", PY_HL_extensions, PY_HL_keywords, "#", "\"\"\"", "\"\"\"", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"javascript", JS_HL_extensions, JS_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"typescript", TS_HL_extensions, TS_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"java", JAVA_HL_extensions, JAVA_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"go", GO_HL_extensions, GO_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"rust", RUST_HL_extensions, RUST_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"ruby", RUBY_HL_extensions, RUBY_HL_keywords, "#", "=begin", "=end", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"swift", SWIFT_HL_extensions, SWIFT_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"php", PHP_HL_extensions, PHP_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"kotlin", KOTLIN_HL_extensions, KOTLIN_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"c#", CS_HL_extensions, CS_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"scala", SCALA_HL_extensions, SCALA_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"lua", LUA_HL_extensions, LUA_HL_keywords, "--", "--[[", "]]", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"perl", PERL_HL_extensions, PERL_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"r", R_HL_extensions, R_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"shell", SHELL_HL_extensions, SHELL_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"sql", SQL_HL_extensions, SQL_HL_keywords, "--", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"html", HTML_HL_extensions, HTML_HL_keywords, NULL, "<!--", "-->", HL_HIGHLIGHT_STRINGS},
-	{"css", CSS_HL_extensions, CSS_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"markdown", MD_HL_extensions, MD_HL_keywords, NULL, NULL, NULL, HL_HIGHLIGHT_STRINGS},
-	{"yaml", YAML_HL_extensions, YAML_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_STRINGS},
-	{"json", JSON_HL_extensions, JSON_HL_keywords, NULL, NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"xml", XML_HL_extensions, XML_HL_keywords, NULL, "<!--", "-->", HL_HIGHLIGHT_STRINGS},
-	{"docker", DOCKER_HL_extensions, DOCKER_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_STRINGS},
-	{"makefile", MAKE_HL_extensions, MAKE_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_STRINGS},
-	{"vim", VIM_HL_extensions, VIM_HL_keywords, "\"", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"elixir", ELIXIR_HL_extensions, ELIXIR_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"haskell", HASKELL_HL_extensions, HASKELL_HL_keywords, "--", "{-", "-}", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"clojure", CLOJURE_HL_extensions, CLOJURE_HL_keywords, ";", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"dart", DART_HL_extensions, DART_HL_keywords, "//", "/*", "*/", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"julia", JULIA_HL_extensions, JULIA_HL_keywords, "#", "#=", "=#", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"zig", ZIG_HL_extensions, ZIG_HL_keywords, "//", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"nim", NIM_HL_extensions, NIM_HL_keywords, "#", "#[", "]#", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"ocaml", OCAML_HL_extensions, OCAML_HL_keywords, NULL, "(*", "*)", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"f#", FSHARP_HL_extensions, FSHARP_HL_keywords, "//", "(*", "*)", HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"assembly", ASM_HL_extensions, ASM_HL_keywords, ";", NULL, NULL, HL_HIGHLIGHT_NUMBERS},
-	{"arm", ARM_HL_extensions, ARM_HL_keywords, ";", NULL, NULL, HL_HIGHLIGHT_NUMBERS},
-	{"mips", MIPS_HL_extensions, MIPS_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS},
-	{"toml", TOML_HL_extensions, TOML_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS},
-	{"text", DEFAULT_HL_extensions, DEFAULT_HL_keywords, NULL, NULL, NULL, 0},
-	{"hako", HAKE_HL_extensions, HAKE_HL_keywords, "#", NULL, NULL, HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS}
+	{.filetype = "c", .filematch = C_HL_extensions, .keywords = C_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_PREPROC | HLF_SQCHAR},
+	{.filetype = "c++", .filematch = CPP_HL_extensions, .keywords = CPP_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_PREPROC | HLF_SQCHAR},
+	{.filetype = "python", .filematch = PY_HL_extensions, .keywords = PY_HL_keywords, .slc = "#",
+	 .flags = C_LIKE | HLF_TRIPLE | HLF_DECOR},
+	{.filetype = "javascript", .filematch = JS_HL_extensions, .keywords = JS_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_BACKTICK, .quotes = "\"'`"},
+	{.filetype = "typescript", .filematch = TS_HL_extensions, .keywords = TS_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_BACKTICK | HLF_DECOR, .quotes = "\"'`"},
+	{.filetype = "java", .filematch = JAVA_HL_extensions, .keywords = JAVA_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_SQCHAR | HLF_TRIPLE | HLF_DECOR},
+	{.filetype = "go", .filematch = GO_HL_extensions, .keywords = GO_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_SQCHAR | HLF_BACKTICK | HLF_RAWBT, .quotes = "\"'`"},
+	{.filetype = "rust", .filematch = RUST_HL_extensions, .keywords = RUST_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_SQCHAR | HLF_NEST | HLF_BANG | HLF_MLSTR},
+	{.filetype = "ruby", .filematch = RUBY_HL_extensions, .keywords = RUBY_HL_keywords, .slc = "#", .mcs = "=begin", .mce = "=end",
+	 .flags = C_LIKE | HLF_MLSTR | HLF_DECOR | HLF_MCS_BOL},
+	{.filetype = "swift", .filematch = SWIFT_HL_extensions, .keywords = SWIFT_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_NEST | HLF_TRIPLE | HLF_DECOR, .quotes = "\""},
+	{.filetype = "php", .filematch = PHP_HL_extensions, .keywords = PHP_HL_keywords, .slc = "//", .slc2 = "#", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_MLSTR | HLF_DOLLAR},
+	{.filetype = "kotlin", .filematch = KOTLIN_HL_extensions, .keywords = KOTLIN_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_SQCHAR | HLF_TRIPLE | HLF_NEST | HLF_DECOR},
+	{.filetype = "c#", .filematch = CS_HL_extensions, .keywords = CS_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_SQCHAR | HLF_PREPROC | HLF_TRIPLE},
+	{.filetype = "scala", .filematch = SCALA_HL_extensions, .keywords = SCALA_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_SQCHAR | HLF_TRIPLE | HLF_NEST | HLF_DECOR},
+	{.filetype = "lua", .filematch = LUA_HL_extensions, .keywords = LUA_HL_keywords, .slc = "--",
+	 .flags = C_LIKE | HLF_LUALONG},
+	{.filetype = "perl", .filematch = PERL_HL_extensions, .keywords = PERL_HL_keywords, .slc = "#",
+	 .flags = C_LIKE | HLF_MLSTR | HLF_DOLLAR | HLF_RAWSQ},
+	{.filetype = "r", .filematch = R_HL_extensions, .keywords = R_HL_keywords, .slc = "#",
+	 .flags = C_LIKE | HLF_MLSTR},
+	{.filetype = "shell", .filematch = SHELL_HL_extensions, .keywords = SHELL_HL_keywords, .slc = "#",
+	 .flags = C_LIKE | HLF_MLSTR | HLF_RAWSQ | HLF_DOLLAR | HLF_HASHWORD},
+	{.filetype = "sql", .filematch = SQL_HL_extensions, .keywords = SQL_HL_keywords, .slc = "--", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_NOCASE | HLF_RAWSQ | HLF_MLSTR},
+	{.filetype = "html", .filematch = HTML_HL_extensions, .keywords = NONE_HL, .mode = HLM_MARKUP},
+	{.filetype = "xml", .filematch = XML_HL_extensions, .keywords = NONE_HL, .mode = HLM_MARKUP},
+	{.filetype = "css", .filematch = CSS_HL_extensions, .keywords = CSS_HL_keywords, .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_DASHID, .mode = HLM_CSS},
+	{.filetype = "scss", .filematch = SCSS_HL_extensions, .keywords = CSS_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_DASHID | HLF_DOLLAR | HLF_HASHWORD, .mode = HLM_CSS},
+	{.filetype = "markdown", .filematch = MD_HL_extensions, .keywords = NONE_HL, .mode = HLM_MARKDOWN},
+	{.filetype = "yaml", .filematch = YAML_HL_extensions, .keywords = YAML_HL_keywords, .slc = "#",
+	 .flags = C_LIKE | HLF_HASHWORD | HLF_RAWSQ, .mode = HLM_YAML},
+	{.filetype = "json", .filematch = JSON_HL_extensions, .keywords = JSON_HL_keywords,
+	 .flags = C_LIKE | HLF_JSONKEY, .quotes = "\""},
+	{.filetype = "jsonc", .filematch = JSONC_HL_extensions, .keywords = JSON_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_JSONKEY, .quotes = "\""},
+	{.filetype = "toml", .filematch = TOML_HL_extensions, .keywords = BOOL_HL_keywords, .slc = "#",
+	 .flags = C_LIKE | HLF_TRIPLE | HLF_RAWSQ, .mode = HLM_INI},
+	{.filetype = "ini", .filematch = INI_HL_extensions, .keywords = BOOL_HL_keywords, .slc = "#", .slc2 = ";",
+	 .flags = HLF_STRINGS | HLF_SLC_BOL, .mode = HLM_INI, .quotes = "\""},
+	{.filetype = "docker", .filematch = DOCKER_HL_extensions, .keywords = DOCKER_HL_keywords, .slc = "#",
+	 .flags = C_LIKE | HLF_NOCASE | HLF_DOLLAR | HLF_SLC_BOL},
+	{.filetype = "makefile", .filematch = MAKE_HL_extensions, .keywords = MAKE_HL_keywords, .slc = "#",
+	 .flags = HLF_STRINGS | HLF_DOLLAR, .mode = HLM_MAKE},
+	{.filetype = "diff", .filematch = DIFF_HL_extensions, .keywords = NONE_HL, .mode = HLM_DIFF},
+	{.filetype = "vim", .filematch = VIM_HL_extensions, .keywords = VIM_HL_keywords, .slc = "\"",
+	 .flags = C_LIKE | HLF_SLC_BOL},
+	{.filetype = "elixir", .filematch = ELIXIR_HL_extensions, .keywords = ELIXIR_HL_keywords, .slc = "#",
+	 .flags = C_LIKE | HLF_TRIPLE | HLF_MLSTR | HLF_DECOR},
+	{.filetype = "haskell", .filematch = HASKELL_HL_extensions, .keywords = HASKELL_HL_keywords, .slc = "--", .mcs = "{-", .mce = "-}",
+	 .flags = C_LIKE | HLF_NEST | HLF_SQCHAR},
+	{.filetype = "clojure", .filematch = CLOJURE_HL_extensions, .keywords = CLOJURE_HL_keywords, .slc = ";",
+	 .flags = C_LIKE | HLF_DASHID | HLF_MLSTR, .quotes = "\""},
+	{.filetype = "dart", .filematch = DART_HL_extensions, .keywords = DART_HL_keywords, .slc = "//", .mcs = "/*", .mce = "*/",
+	 .flags = C_LIKE | HLF_TRIPLE | HLF_DECOR | HLF_DOLLAR},
+	{.filetype = "julia", .filematch = JULIA_HL_extensions, .keywords = JULIA_HL_keywords, .slc = "#", .mcs = "#=", .mce = "=#",
+	 .flags = C_LIKE | HLF_TRIPLE | HLF_SQCHAR | HLF_NEST},
+	{.filetype = "zig", .filematch = ZIG_HL_extensions, .keywords = ZIG_HL_keywords, .slc = "//",
+	 .flags = C_LIKE | HLF_SQCHAR | HLF_DECOR},
+	{.filetype = "nim", .filematch = NIM_HL_extensions, .keywords = NIM_HL_keywords, .slc = "#", .mcs = "#[", .mce = "]#",
+	 .flags = C_LIKE | HLF_TRIPLE | HLF_SQCHAR | HLF_NEST},
+	{.filetype = "ocaml", .filematch = OCAML_HL_extensions, .keywords = OCAML_HL_keywords, .mcs = "(*", .mce = "*)",
+	 .flags = C_LIKE | HLF_NEST | HLF_SQCHAR},
+	{.filetype = "f#", .filematch = FSHARP_HL_extensions, .keywords = FSHARP_HL_keywords, .slc = "//", .mcs = "(*", .mce = "*)",
+	 .flags = C_LIKE | HLF_NEST | HLF_SQCHAR | HLF_TRIPLE},
+	{.filetype = "assembly", .filematch = ASM_HL_extensions, .keywords = ASM_HL_keywords, .slc = ";", .slc2 = "#",
+	 .flags = C_LIKE},
+	{.filetype = "hakorc", .filematch = HAKE_HL_extensions, .keywords = BOOL_HL_keywords, .slc = "#",
+	 .flags = HLF_SLC_BOL | HLF_NUMBERS, .mode = HLM_INI, .quotes = ""},
+	{.filetype = "text", .filematch = NONE_HL, .keywords = NONE_HL},
 };
+#define HLDB_ENTRIES ((int)(sizeof(HLDB) / sizeof(HLDB[0])))
+#define HL_TEXT (&HLDB[HLDB_ENTRIES - 1])
+
+static int hkIdentChar(const struct editorSyntax *syn, unsigned char c) {
+	return isalnum(c) || c == '_' || c >= 0x80 || ((syn->flags & HLF_DASHID) && (c == '-' || c == '?' || c == '!'));
+}
+
+/* 0, or the class of the keyword s[0..len) */
+static int hkKeyword(const struct editorSyntax *syn, const char *s, int len) {
+	const char *const *kw = syn->keywords;
+	if (!kw) return 0;
+	int nocase = syn->flags & HLF_NOCASE;
+	for (int j = 0; kw[j]; j++) {
+		const char *k = kw[j];
+		int kl = (int)strlen(k);
+		int cls = HL_KEYWORD1;
+		if (kl > 1 && k[kl - 1] == '|') { kl--; cls = HL_KEYWORD2; }
+		else if (kl > 1 && k[kl - 1] == '!') { kl--; cls = HL_CONSTANT; }
+		if (kl != len) continue;
+		if (nocase ? strncasecmp(k, s, len) == 0 : (k[0] == s[0] && strncmp(k, s, len) == 0)) return cls;
+	}
+	return 0;
+}
+
+static void hkMark(unsigned char *hl, int from, int to, int cls) {
+	for (int k = from; k < to; k++) hl[k] = (unsigned char)cls;
+}
+
+/* length of the escape at s[i] (s[i] == '\\'), at most to n */
+static int hkEscapeLen(const char *s, int i, int n) {
+	if (i + 1 >= n) return 1;
+	char c = s[i + 1];
+	int j = i + 2;
+	if (c == 'x') { while (j < n && j < i + 4 && isxdigit((unsigned char)s[j])) j++; }
+	else if (c == 'u' && j < n && s[j] == '{') { while (j < n && s[j] != '}') j++; if (j < n) j++; }
+	else if (c == 'u') { while (j < n && j < i + 6 && isxdigit((unsigned char)s[j])) j++; }
+	else if (c == 'U') { while (j < n && j < i + 10 && isxdigit((unsigned char)s[j])) j++; }
+	else if (c >= '0' && c <= '7') { while (j < n && j < i + 4 && s[j] >= '0' && s[j] <= '7') j++; }
+	return j - i;
+}
+
+/* Inside a string: marks up to the closing delimiter. Returns the index after
+   it, and sets *closed. raw: no escapes. */
+static int hkScanString(const char *s, int i, int n, unsigned char *hl, const char *close, int raw, int *closed, int vars) {
+	int cl = (int)strlen(close);
+	*closed = 0;
+	while (i < n) {
+		if (vars && s[i] == '$' && i + 1 < n && (isalpha((unsigned char)s[i + 1]) || s[i + 1] == '_' || s[i + 1] == '{')) {
+			int j = i + 1;                          /* "$HOME and ${PATH}" */
+			if (s[j] == '{') { while (j < n && s[j] != '}') j++; if (j < n) j++; }
+			else while (j < n && (isalnum((unsigned char)s[j]) || s[j] == '_')) j++;
+			hkMark(hl, i, j, HL_VARIABLE);
+			i = j;
+			continue;
+		}
+		if (!raw && s[i] == '\\') {
+			int e = hkEscapeLen(s, i, n);
+			hkMark(hl, i, i + e, HL_ESCAPE);
+			i += e;
+			continue;
+		}
+		if (i + cl <= n && strncmp(s + i, close, cl) == 0) {
+			hkMark(hl, i, i + cl, HL_STRING);
+			*closed = 1;
+			return i + cl;
+		}
+		hl[i++] = HL_STRING;
+	}
+	return i;
+}
+
+/* the number at s[i]: 0x1F, 1_000, 1e-5, 2.5f, 10u32, .5 */
+static int hkScanNumber(const char *s, int i, int n) {
+	int hex = (s[i] == '0' && i + 1 < n && (s[i + 1] == 'x' || s[i + 1] == 'X'));
+	int j = i;
+	while (j < n) {
+		unsigned char c = (unsigned char)s[j];
+		if (isalnum(c) || c == '_') { j++; continue; }
+		if (c == '.' && j + 1 < n && isdigit((unsigned char)s[j + 1])) { j++; continue; }
+		if (c == '.' && j > i && (j + 1 >= n || (!isalpha((unsigned char)s[j + 1]) && s[j + 1] != '.' && s[j + 1] != '_'))) { j++; continue; }
+		if ((c == '+' || c == '-') && j > i && !hex && (s[j - 1] == 'e' || s[j - 1] == 'E')) { j++; continue; }
+		if ((c == '+' || c == '-') && j > i && hex && (s[j - 1] == 'p' || s[j - 1] == 'P')) { j++; continue; }
+		break;
+	}
+	return j;
+}
+
+static int hkLuaLong(const char *s, int i, int n, int *level) {
+	if (i >= n || s[i] != '[') return 0;
+	int j = i + 1, l = 0;
+	while (j < n && s[j] == '=') { j++; l++; }
+	if (j < n && s[j] == '[') { *level = l; return j + 1 - i; }
+	return 0;
+}
+
+static int hkLuaClose(const char *s, int i, int n, int level) {
+	if (s[i] != ']') return 0;
+	int j = i + 1, l = 0;
+	while (j < n && s[j] == '=') { j++; l++; }
+	return (j < n && s[j] == ']' && l == level) ? j + 1 - i : 0;
+}
+
+/* The generic highlighter: one line, in-state st, returns the out-state. */
+static int hkHlCode(const struct editorSyntax *syn, const char *s, int n, unsigned char *hl, int st) {
+	int kind = ST_KIND(st), lvl = ST_LVL(st), hi = ST_HI(st);
+	const char *quotes = syn->quotes ? syn->quotes : "\"'";
+	int f = syn->flags;
+	int scs = syn->slc ? (int)strlen(syn->slc) : 0;
+	int scs2 = syn->slc2 ? (int)strlen(syn->slc2) : 0;
+	int mcs = syn->mcs ? (int)strlen(syn->mcs) : 0;
+	int mce = syn->mce ? (int)strlen(syn->mce) : 0;
+	int css = syn->mode == HLM_CSS;
+	int i = 0, bol = 1;
+	char qbuf[4];
+
+	while (i < n) {
+		/* carried over from the line above */
+		if (kind == ST_COMMENT) {
+			while (i < n) {
+				if (mce && i + mce <= n && !strncmp(s + i, syn->mce, mce)) {
+					hkMark(hl, i, i + mce, HL_MLCOMMENT);
+					i += mce;
+					if (lvl > 0 && (f & HLF_NEST)) { lvl--; continue; }
+					kind = ST_NONE; lvl = 0;
+					break;
+				}
+				if ((f & HLF_NEST) && mcs && i + mcs <= n && !strncmp(s + i, syn->mcs, mcs)) {
+					hkMark(hl, i, i + mcs, HL_MLCOMMENT);
+					i += mcs;
+					if (lvl < 15) lvl++;
+					continue;
+				}
+				hl[i++] = HL_MLCOMMENT;
+			}
+			continue;
+		}
+		if (kind == ST_LUACOM || kind == ST_LUASTR) {
+			int cls = kind == ST_LUACOM ? HL_MLCOMMENT : HL_STRING;
+			while (i < n) {
+				int c = hkLuaClose(s, i, n, lvl);
+				if (c) { hkMark(hl, i, i + c, cls); i += c; kind = ST_NONE; lvl = 0; break; }
+				hl[i++] = (unsigned char)cls;
+			}
+			continue;
+		}
+		if (kind == ST_TDQ || kind == ST_TSQ || kind == ST_BT || kind == ST_DQ || kind == ST_SQ) {
+			const char *close = kind == ST_TDQ ? "\"\"\"" : kind == ST_TSQ ? "'''" : kind == ST_BT ? "`" : kind == ST_DQ ? "\"" : "'";
+			int raw = (kind == ST_BT && (f & HLF_RAWBT)) || ((kind == ST_SQ || kind == ST_TSQ) && (f & HLF_RAWSQ));
+			int closed, start = i;
+			i = hkScanString(s, i, n, hl, close, raw, &closed, (f & HLF_DOLLAR) && kind != ST_SQ && kind != ST_TSQ);
+			if (closed) {
+				if ((f & HLF_JSONKEY) && kind == ST_DQ) {
+					int k = i, ks = (start > 0 && s[start - 1] == '"') ? start - 1 : start;
+					while (k < n && (s[k] == ' ' || s[k] == '\t')) k++;
+					if (k < n && s[k] == ':') hkMark(hl, ks, i, HL_KEY);
+				}
+				kind = ST_NONE;
+			} else if ((kind == ST_DQ || kind == ST_SQ) && !(f & HLF_MLSTR) && !(n > 0 && s[n - 1] == '\\')) {
+				kind = ST_NONE;                     /* unterminated: it ends with the line */
+			}
+			continue;
+		}
+
+		unsigned char c = (unsigned char)s[i];
+		int prev_ident = i > 0 && hkIdentChar(syn, (unsigned char)s[i - 1]);
+		if (c == ' ' || c == '\t') { i++; continue; }
+
+		/* comments */
+		int word_ok = !(f & HLF_HASHWORD) || i == 0 || s[i - 1] == ' ' || s[i - 1] == '\t';
+		int bol_ok = !(f & HLF_SLC_BOL) || bol;
+		if ((f & HLF_LUALONG) && scs && i + 2 < n && !strncmp(s + i, "--", 2)) {
+			int l = 0, len = hkLuaLong(s, i + 2, n, &l);
+			if (len) { hkMark(hl, i, i + 2 + len, HL_MLCOMMENT); i += 2 + len; kind = ST_LUACOM; lvl = l; continue; }
+		}
+		if (word_ok && bol_ok && ((scs && i + scs <= n && !strncmp(s + i, syn->slc, scs)) ||
+		                          (scs2 && i + scs2 <= n && !strncmp(s + i, syn->slc2, scs2)))) {
+			hkMark(hl, i, n, HL_COMMENT);
+			break;
+		}
+		if (mcs && i + mcs <= n && !strncmp(s + i, syn->mcs, mcs) && (!(f & HLF_MCS_BOL) || i == 0)) {
+			hkMark(hl, i, i + mcs, HL_MLCOMMENT);
+			i += mcs;
+			kind = ST_COMMENT; lvl = 0;
+			continue;
+		}
+		if ((f & HLF_LUALONG) && c == '[') {
+			int l = 0, len = hkLuaLong(s, i, n, &l);
+			if (len) { hkMark(hl, i, i + len, HL_STRING); i += len; kind = ST_LUASTR; lvl = l; continue; }
+		}
+
+		/* # directives */
+		if ((f & HLF_PREPROC) && c == '#' && bol) {
+			int j = i + 1;
+			while (j < n && (s[j] == ' ' || s[j] == '\t')) j++;
+			int w = j;
+			while (j < n && isalpha((unsigned char)s[j])) j++;
+			hkMark(hl, i, j, HL_PREPROCESSOR);
+			int inc = (j - w == 7 && !strncmp(s + w, "include", 7)) || (j - w == 6 && !strncmp(s + w, "import", 6));
+			i = j;
+			bol = 0;
+			if (inc) {
+				while (i < n && s[i] == ' ') i++;
+				if (i < n && s[i] == '<') {
+					int e = i;
+					while (e < n && s[e] != '>') e++;
+					hkMark(hl, i, e < n ? e + 1 : n, HL_STRING);
+					i = e < n ? e + 1 : n;
+				}
+			}
+			continue;
+		}
+		bol = 0;
+		if ((f & HLF_BANG) && c == '#' && i + 1 < n && (s[i + 1] == '[' || (s[i + 1] == '!' && i + 2 < n && s[i + 2] == '['))) {
+			int j = i, depth = 0;
+			while (j < n) { if (s[j] == '[') depth++; else if (s[j] == ']' && --depth == 0) { j++; break; } j++; }
+			hkMark(hl, i, j, HL_PREPROCESSOR);
+			i = j;
+			continue;
+		}
+		if ((f & HLF_DECOR) && c == '@' && i + 1 < n && (isalpha((unsigned char)s[i + 1]) || s[i + 1] == '_' || s[i + 1] == '@')) {
+			int j = i + 1;
+			while (j < n && (hkIdentChar(syn, (unsigned char)s[j]) || s[j] == '.' || s[j] == '@')) j++;
+			hkMark(hl, i, j, HL_PREPROCESSOR);
+			i = j;
+			continue;
+		}
+		if ((f & HLF_DOLLAR) && c == '$' && i + 1 < n) {
+			int j = i + 1;
+			char o = s[j];
+			if (o == '{' || (o == '(' && syn->mode == HLM_MAKE)) {
+				char cl = o == '{' ? '}' : ')';
+				int depth = 0;
+				while (j < n) { if (s[j] == o) depth++; else if (s[j] == cl && --depth == 0) { j++; break; } j++; }
+			} else if (o == '(') {
+				j++;                                /* $( in a shell is a command: only mark the opener */
+			} else if (isalpha((unsigned char)o) || o == '_') {
+				while (j < n && (isalnum((unsigned char)s[j]) || s[j] == '_')) j++;
+			} else if (strchr("0123456789@#?*!$-<^%+", o)) {
+				j++;
+			} else {
+				hl[i++] = HL_OPERATOR;
+				continue;
+			}
+			hkMark(hl, i, j, HL_VARIABLE);
+			i = j;
+			continue;
+		}
+
+		/* strings */
+		if ((f & HLF_STRINGS) && c && strchr(quotes, c)) {
+			if ((f & HLF_TRIPLE) && (c == '"' || c == '\'') && i + 2 < n && s[i + 1] == (char)c && s[i + 2] == (char)c) {
+				hkMark(hl, i, i + 3, HL_STRING);
+				i += 3;
+				kind = c == '"' ? ST_TDQ : ST_TSQ;
+				continue;
+			}
+			if (c == '\'' && (f & HLF_SQCHAR)) {
+				if (prev_ident) { i++; continue; }  /* x' (a prime), it's */
+				int j = i + 1;
+				if (j < n && s[j] == '\\') j += hkEscapeLen(s, j, n);
+				else if (j < n) j += utf8_byte_length((unsigned char)s[j]);
+				if (j < n && s[j] == '\'') {
+					hkMark(hl, i, j + 1, HL_CHAR);
+					for (int k = i + 1; k < j; k++) if (s[k] == '\\') { hkMark(hl, k, j, HL_ESCAPE); break; }
+					i = j + 1;
+					continue;
+				}
+				j = i + 1;                          /* 'a lifetime, a label */
+				while (j < n && hkIdentChar(syn, (unsigned char)s[j])) j++;
+				hkMark(hl, i, j, j > i + 1 ? HL_LABEL : HL_OPERATOR);
+				i = j;
+				continue;
+			}
+			if (syn->mode == HLM_YAML) {             /* a quote opens a scalar, not a word */
+				int k = i - 1;
+				while (k >= 0 && s[k] == ' ') k--;
+				if (k >= 0 && !strchr(":-[{,?", s[k])) { i++; continue; }
+			}
+			if (c == '`' && (f & HLF_BACKTICK)) {
+				hl[i++] = HL_STRING;
+				kind = ST_BT;
+				continue;
+			}
+			qbuf[0] = (char)c; qbuf[1] = '\0';
+			hl[i++] = HL_STRING;
+			kind = c == '"' ? ST_DQ : c == '\'' ? ST_SQ : ST_BT;
+			if (kind == ST_BT && !(f & HLF_BACKTICK)) {      /* a ` string that may not span lines */
+				int closed;
+				i = hkScanString(s, i, n, hl, qbuf, 0, &closed, 0);
+				kind = ST_NONE;
+			}
+			continue;
+		}
+
+		/* numbers */
+		if ((f & HLF_NUMBERS) && !prev_ident && (isdigit(c) || (c == '.' && i + 1 < n && isdigit((unsigned char)s[i + 1])))) {
+			int j = hkScanNumber(s, i, n);
+			hkMark(hl, i, j, HL_NUMBER);
+			i = j;
+			continue;
+		}
+		if (css && c == '#' && hi > 0) {             /* a color value */
+			int j = i + 1;
+			while (j < n && isxdigit((unsigned char)s[j])) j++;
+			hkMark(hl, i, j, HL_NUMBER);
+			i = j;
+			continue;
+		}
+
+		/* names */
+		if (isalpha(c) || c == '_' || c >= 0x80 || ((f & HLF_DASHID) && c == '-' && i + 1 < n && isalpha((unsigned char)s[i + 1]))) {
+			int j = i;
+			while (j < n && hkIdentChar(syn, (unsigned char)s[j])) j++;
+			int len = j - i;
+			if ((f & HLF_STRINGS) && j < n && strchr(quotes, s[j]) && s[j] && len <= 2) {
+				int pfx = 1;                        /* r"..", b'..', f"..", u8"..", L".." */
+				for (int k = i; k < j; k++) if (!strchr("rRbBfFuUlL8", s[k])) pfx = 0;
+				if (pfx && syn->mode != HLM_YAML) { hkMark(hl, i, j, HL_STRING); i = j; continue; }
+			}
+			if ((f & HLF_BANG) && j < n && s[j] == '!' && (j + 1 >= n || s[j + 1] != '=')) {
+				hkMark(hl, i, j + 1, HL_PREPROCESSOR);
+				i = j + 1;
+				continue;
+			}
+			if (css) {
+				int k = j;
+				while (k < n && s[k] == ' ') k++;
+				if (hi > 0 && k < n && s[k] == ':') { hkMark(hl, i, j, HL_KEY); i = j; continue; }
+				if (hi == 0) {
+					int cls = (i > 0 && s[i - 1] == ':') ? HL_KEYWORD2 : HL_KEYWORD1;
+					if (i > 0 && (s[i - 1] == '.' || s[i - 1] == '#')) hl[i - 1] = (unsigned char)cls;
+					if (i > 0 && s[i - 1] == '@') { hl[i - 1] = HL_PREPROCESSOR; cls = HL_PREPROCESSOR; }
+					hkMark(hl, i, j, cls);
+					i = j;
+					continue;
+				}
+			}
+			int cls = hkKeyword(syn, s + i, len);
+			if (cls) hkMark(hl, i, j, cls);
+			i = j;
+			continue;
+		}
+
+		if (css && c == '{') hi = hi < 255 ? hi + 1 : hi;
+		if (css && c == '}') hi = hi > 0 ? hi - 1 : 0;
+		if (strchr("(){}[]", c)) hl[i] = HL_BRACKET;
+		else if (strchr("+-*/%=<>!&|^~?:,;.", c)) hl[i] = HL_OPERATOR;
+		i++;
+	}
+	if (kind == ST_DQ && !(f & HLF_MLSTR) && !(n > 0 && s[n - 1] == '\\')) kind = ST_NONE;
+	if (kind == ST_SQ && !(f & HLF_MLSTR) && !(n > 0 && s[n - 1] == '\\')) kind = ST_NONE;
+	return ST_MAKE(kind, lvl, hi);
+}
+
+static int hkBlank(const char *s, int n) {
+	for (int i = 0; i < n; i++) if (s[i] != ' ' && s[i] != '\t') return 0;
+	return 1;
+}
+
+/* key = value, [section], # comments at the start of a line */
+static void hkHlIni(const char *s, int n, unsigned char *hl) {
+	int i = 0;
+	while (i < n && s[i] == ' ') i++;
+	if (i < n && s[i] == '[') {
+		int e = n;
+		while (e > i && s[e - 1] != ']') e--;
+		if (e > i) hkMark(hl, i, e, HL_KEYWORD1);
+		return;
+	}
+	int k = i;
+	while (k < n && s[k] != '=' && s[k] != ':' && s[k] != '"' && s[k] != '#') k++;
+	if (k < n && k > i && (s[k] == '=' || s[k] == ':') && hl[i] != HL_COMMENT) {
+		int e = k;
+		while (e > i && s[e - 1] == ' ') e--;
+		hkMark(hl, i, e, HL_KEY);
+	}
+}
+
+static void hkHlYaml(const char *s, int n, unsigned char *hl) {
+	if (n >= 3 && (!strncmp(s, "---", 3) || !strncmp(s, "...", 3)) && hkBlank(s + 3, n - 3)) {
+		hkMark(hl, 0, n, HL_PREPROCESSOR);
+		return;
+	}
+	int i = 0;
+	while (i < n && (s[i] == ' ' || s[i] == '-')) {
+		if (s[i] == '-' && (i + 1 >= n || s[i + 1] == ' ')) hl[i] = HL_MARKER;
+		i++;
+	}
+	int k = i;
+	if (k < n && (s[k] == '"' || s[k] == '\'')) {        /* "quoted key": */
+		char q = s[k++];
+		while (k < n && s[k] != q) k++;
+		if (k < n) k++;
+	} else {
+		while (k < n && s[k] != ':' && s[k] != '#') k++;
+	}
+	if (k < n && s[k] == ':' && (k + 1 >= n || s[k + 1] == ' ') && k > i && hl[i] != HL_COMMENT)
+		hkMark(hl, i, k, HL_KEY);
+	for (int j = k; j < n; j++) {
+		if (hl[j] != HL_NORMAL && hl[j] != HL_OPERATOR) continue;
+		if ((s[j] == '&' || s[j] == '*') && (j == 0 || s[j - 1] == ' ') && j + 1 < n && s[j + 1] != ' ') {
+			int e = j + 1;
+			while (e < n && s[e] != ' ') e++;
+			hkMark(hl, j, e, HL_LABEL);
+			j = e;
+		} else if (s[j] == '!' && (j == 0 || s[j - 1] == ' ')) {
+			int e = j + 1;
+			while (e < n && s[e] != ' ') e++;
+			hkMark(hl, j, e, HL_PREPROCESSOR);
+			j = e;
+		}
+	}
+}
+
+/* targets, variable assignments; the rest is the generic pass */
+static void hkHlMake(const char *s, int n, unsigned char *hl) {
+	if (n == 0 || s[0] == ' ' || s[0] == '\t' || hl[0] == HL_COMMENT) return;
+	int k = 0;
+	while (k < n && s[k] != ':' && s[k] != '=' && s[k] != '#') k++;
+	if (k >= n || s[k] == '#') return;
+	int assign = s[k] == '=' || (k + 1 < n && s[k] == ':' && (s[k + 1] == '=' || s[k + 1] == ':'));
+	int e = k;
+	while (e > 0 && (s[e - 1] == ' ' || s[e - 1] == '?' || s[e - 1] == '+' || s[e - 1] == '!')) e--;
+	for (int j = 0; j < e; j++)
+		if (hl[j] == HL_NORMAL || hl[j] == HL_OPERATOR) hl[j] = (unsigned char)(assign ? HL_KEY : HL_KEYWORD1);
+}
+
+static int hkHlDiff(const char *s, int n, unsigned char *hl) {
+	if (n == 0) return 0;
+	int cls = HL_NORMAL;
+	if (!strncmp(s, "+++", 3) || !strncmp(s, "---", 3) || !strncmp(s, "diff ", 5) || !strncmp(s, "index ", 6))
+		cls = HL_KEYWORD2;
+	else if (!strncmp(s, "@@", 2)) cls = HL_PREPROCESSOR;
+	else if (s[0] == '+') cls = HL_DIFF_ADD;
+	else if (s[0] == '-') cls = HL_DIFF_DEL;
+	else if (s[0] == '\\') cls = HL_COMMENT;
+	hkMark(hl, 0, n, cls);
+	return 0;
+}
+
+/* HTML and XML: tags, attributes, entities, comments; a tag may span lines */
+static int hkHlMarkup(const char *s, int n, unsigned char *hl, int st) {
+	int kind = ST_KIND(st);
+	int i = 0;
+	while (i < n) {
+		if (kind == ST_COMMENT) {
+			while (i < n) {
+				if (i + 3 <= n && !strncmp(s + i, "-->", 3)) { hkMark(hl, i, i + 3, HL_MLCOMMENT); i += 3; kind = ST_NONE; break; }
+				hl[i++] = HL_MLCOMMENT;
+			}
+			continue;
+		}
+		if (kind == ST_TAGDQ || kind == ST_TAGSQ) {
+			char q = kind == ST_TAGDQ ? '"' : '\'';
+			while (i < n && s[i] != q) hl[i++] = HL_STRING;
+			if (i < n) { hl[i++] = HL_STRING; kind = ST_TAG; }
+			continue;
+		}
+		if (kind == ST_TAG) {
+			unsigned char c = (unsigned char)s[i];
+			if (c == '>' || (c == '/' && i + 1 < n && s[i + 1] == '>') || (c == '?' && i + 1 < n && s[i + 1] == '>')) {
+				int e = c == '>' ? i + 1 : i + 2;
+				hkMark(hl, i, e, HL_TAG);
+				i = e;
+				kind = ST_NONE;
+			} else if (c == '"' || c == '\'') {
+				hl[i++] = HL_STRING;
+				kind = c == '"' ? ST_TAGDQ : ST_TAGSQ;
+			} else if (isalpha(c) || c == '_' || c == ':' || c == '@') {
+				int j = i;
+				while (j < n && (isalnum((unsigned char)s[j]) || strchr("_-:.@", s[j]))) j++;
+				hkMark(hl, i, j, HL_ATTRNAME);
+				i = j;
+			} else {
+				if (c == '=') hl[i] = HL_OPERATOR;
+				i++;
+			}
+			continue;
+		}
+		if (i + 4 <= n && !strncmp(s + i, "<!--", 4)) { hkMark(hl, i, i + 4, HL_MLCOMMENT); i += 4; kind = ST_COMMENT; continue; }
+		if (s[i] == '<' && i + 1 < n && (s[i + 1] == '!' || s[i + 1] == '?')) {   /* <!DOCTYPE>, <?xml ?> */
+			int j = i + 2;
+			while (j < n && (isalnum((unsigned char)s[j]) || s[j] == '-')) j++;
+			hkMark(hl, i, j, HL_PREPROCESSOR);
+			i = j;
+			kind = ST_TAG;
+			continue;
+		}
+		if (s[i] == '<' && i + 1 < n && (isalpha((unsigned char)s[i + 1]) || s[i + 1] == '/')) {
+			int j = i + 1;
+			if (s[j] == '/') j++;
+			while (j < n && (isalnum((unsigned char)s[j]) || strchr("_-:.", s[j]))) j++;
+			hkMark(hl, i, j, HL_TAG);
+			i = j;
+			kind = ST_TAG;
+			continue;
+		}
+		if (s[i] == '&') {
+			int j = i + 1;
+			while (j < n && j < i + 12 && (isalnum((unsigned char)s[j]) || s[j] == '#')) j++;
+			if (j < n && s[j] == ';' && j > i + 1) { hkMark(hl, i, j + 1, HL_ESCAPE); i = j + 1; continue; }
+		}
+		i++;
+	}
+	return ST_MAKE(kind, 0, 0);
+}
+
+/* ---- markdown ----
+   in-state bits: 0-15 the fenced language's own state (or 1 = inside <!-- -->),
+   16 in a fence, 17 the fence is ~, 18-21 its length, 22-28 the language + 1,
+   29 front matter, 30 in a table. */
+#define MD_FENCE  (1 << 16)
+#define MD_TILDE  (1 << 17)
+#define MD_FLEN(st)  (((st) >> 18) & 15)
+#define MD_LANG(st)  (((st) >> 22) & 127)
+#define MD_FM     (1 << 29)
+#define MD_TABLE  (1 << 30)
+
+static const struct editorSyntax *hkSyntaxByName(const char *name);
+static int hkHlLine(const struct editorSyntax *syn, const char *s, int n, unsigned char *hl, int st,
+                    const char *prev, int prevn, const char *next, int nextn);
+
+static int hkIndent(const char *s, int n) {
+	int i = 0;
+	while (i < n && s[i] == ' ') i++;
+	return i;
+}
+
+/* a run of 3+ ` or ~ after at most 3 spaces: returns its length, sets *ch */
+static int hkMdFence(const char *s, int n, char *ch) {
+	int i = hkIndent(s, n);
+	if (i > 3 || i >= n || (s[i] != '`' && s[i] != '~')) return 0;
+	char c = s[i];
+	int j = i;
+	while (j < n && s[j] == c) j++;
+	if (j - i < 3) return 0;
+	if (c == '`') for (int k = j; k < n; k++) if (s[k] == '`') return 0;
+	*ch = c;
+	return j - i;
+}
+
+static int hkMdRule(const char *s, int n) {
+	int i = hkIndent(s, n), cnt = 0;
+	if (i > 3 || i >= n || !strchr("-*_", s[i])) return 0;
+	char c = s[i];
+	for (; i < n; i++) {
+		if (s[i] == c) cnt++;
+		else if (s[i] != ' ' && s[i] != '\t') return 0;
+	}
+	return cnt >= 3;
+}
+
+/* === or --- under a line: a setext heading */
+static int hkMdUnderline(const char *s, int n) {
+	int i = hkIndent(s, n);
+	if (i > 3 || i >= n || (s[i] != '=' && s[i] != '-')) return 0;
+	char c = s[i];
+	while (i < n && s[i] == c) i++;
+	return hkBlank(s + i, n - i);
+}
+
+static int hkMdTableDelim(const char *s, int n) {
+	int dash = 0, pipe = 0;
+	if (!s) return 0;
+	for (int i = 0; i < n; i++) {
+		if (s[i] == '-') dash++;
+		else if (s[i] == '|') pipe++;
+		else if (s[i] != ':' && s[i] != ' ' && s[i] != '\t') return 0;
+	}
+	return dash >= 1 && (pipe >= 1 || dash >= 3) && pipe >= 1;
+}
+
+static int hkMdListMarker(const char *s, int n, int i) {
+	if (i < n && strchr("-*+", s[i]) && (i + 1 >= n || s[i + 1] == ' ' || s[i + 1] == '\t')) return 1;
+	int j = i;
+	while (j < n && j < i + 9 && isdigit((unsigned char)s[j])) j++;
+	if (j > i && j < n && (s[j] == '.' || s[j] == ')') && (j + 1 >= n || s[j + 1] == ' ')) return j + 1 - i;
+	return 0;
+}
+
+static int hkMdParagraph(const char *s, int n) {
+	if (!s || hkBlank(s, n)) return 0;
+	int i = hkIndent(s, n);
+	char ch;
+	if (i < n && (s[i] == '#' || s[i] == '>' || hkMdListMarker(s, n, i) || hkMdFence(s, n, &ch) || hkMdRule(s, n))) return 0;
+	return 1;
+}
+
+/* inline: code spans, emphasis, links, autolinks, escapes, html comments */
+static int hkMdInline(const char *s, int from, int n, unsigned char *hl, int base) {
+	int closers[16], nc = 0;
+	int i = from;
+	while (i < n) {
+		for (int k = 0; k < nc; k++) {
+			if (closers[k] == i) {
+				char ch = s[i];
+				while (i < n && s[i] == ch) i++;
+				closers[k] = -1;
+				goto next;
+			}
+		}
+		unsigned char c = (unsigned char)s[i];
+		if (c == '\\' && i + 1 < n && ispunct((unsigned char)s[i + 1])) {
+			hl[i] = HL_DELIM;
+			i += 2;
+			continue;
+		}
+		if (c == '`') {
+			int k = i;
+			while (k < n && s[k] == '`') k++;
+			int run = k - i, j = k;
+			while (j < n) {
+				if (s[j] == '`') {
+					int e = j;
+					while (e < n && s[e] == '`') e++;
+					if (e - j == run) { hkMark(hl, i, e, HL_CODE); i = e; goto next; }
+					j = e;
+				} else j++;
+			}
+			i = k;
+			continue;
+		}
+		if (c == '<' && i + 4 <= n && !strncmp(s + i, "<!--", 4)) {
+			const char *e = NULL;
+			for (int j = i + 4; j + 3 <= n; j++) if (!strncmp(s + j, "-->", 3)) { e = s + j; break; }
+			int end = e ? (int)(e - s) + 3 : n;
+			hkMark(hl, i, end, HL_COMMENT);
+			if (!e) return 1;
+			i = end;
+			continue;
+		}
+		if (c == '<' && i + 1 < n && (isalpha((unsigned char)s[i + 1]))) {
+			int j = i + 1;
+			while (j < n && s[j] != '>' && s[j] != ' ') j++;
+			if (j < n && s[j] == '>' && memchr(s + i, ':', j - i)) { hkMark(hl, i, j + 1, HL_URL); i = j + 1; continue; }
+		}
+		if ((c == 'h' && i + 8 <= n && (!strncmp(s + i, "https://", 8) || !strncmp(s + i, "http://", 7))) && (i == 0 || !isalnum((unsigned char)s[i - 1]))) {
+			int j = i;
+			while (j < n && s[j] != ' ' && s[j] != '\t' && s[j] != '<' && s[j] != '>') j++;
+			while (j > i && strchr(".,;:!?)'\"*_", s[j - 1])) j--;
+			hkMark(hl, i, j, HL_URL);
+			i = j;
+			continue;
+		}
+		if (c == '[' || (c == '!' && i + 1 < n && s[i + 1] == '[')) {
+			int o = c == '!' ? i + 1 : i;
+			int depth = 0, j = o;
+			for (; j < n; j++) {
+				if (s[j] == '\\') { j++; continue; }
+				if (s[j] == '[') depth++;
+				else if (s[j] == ']' && --depth == 0) break;
+			}
+			if (j < n) {
+				if (j + 1 < n && (s[j + 1] == '(' || s[j + 1] == '[')) {
+					char cl = s[j + 1] == '(' ? ')' : ']';
+					int e = j + 2, d2 = 1;
+					while (e < n) { if (s[e] == s[j + 1]) d2++; else if (s[e] == cl && --d2 == 0) break; e++; }
+					if (e < n) {
+						hkMark(hl, i, j + 1, HL_LINK);
+						hkMark(hl, j + 1, e + 1, HL_URL);
+						i = e + 1;
+						continue;
+					}
+				}
+				if (j + 1 < n && s[j + 1] == ':' && o == hkIndent(s, n)) {        /* [ref]: url */
+					hkMark(hl, i, j + 2, HL_LINK);
+					hkMark(hl, j + 2, n, HL_URL);
+					return 0;
+				}
+				if (o + 1 < n && s[o + 1] == '^') { hkMark(hl, i, j + 1, HL_LINK); i = j + 1; continue; }
+			}
+		}
+		if (c == '*' || c == '_' || (c == '~' && i + 1 < n && s[i + 1] == '~')) {
+			int k = i;
+			while (k < n && s[k] == (char)c) k++;
+			int run = k - i;
+			int left = k < n && s[k] != ' ' && s[k] != '\t';
+			if (c == '_' && i > 0 && isalnum((unsigned char)s[i - 1])) left = 0;   /* snake_case */
+			if (left && run <= 3 && nc < 16) {
+				for (int j = k; j < n; j++) {
+					if (s[j] == '`') {                  /* do not close inside a code span */
+						int e = j;
+						while (e < n && s[e] == '`') e++;
+						int r2 = e - j, m = e;
+						while (m < n) {
+							if (s[m] == '`') { int q = m; while (q < n && s[q] == '`') q++; if (q - m == r2) { m = q; break; } m = q; }
+							else m++;
+						}
+						j = m - 1;
+						continue;
+					}
+					if (s[j] != (char)c) continue;
+					int e = j;
+					while (e < n && s[e] == (char)c) e++;
+					int right = s[j - 1] != ' ' && s[j - 1] != '\t';
+					if (c == '_' && e < n && isalnum((unsigned char)s[e])) right = 0;
+					if (e - j == run && right) {
+						int cls = c == '~' ? HL_STRIKE : run == 1 ? HL_EMPH : run == 2 ? HL_STRONG : HL_STRONGEMPH;
+						if (cls == HL_STRONG && base == HL_EMPH) cls = HL_STRONGEMPH;
+						hkMark(hl, i, e, cls);
+						closers[nc++] = j;
+						i = k;
+						goto next;
+					}
+					j = e - 1;
+				}
+			}
+			i = k;
+			continue;
+		}
+		i++;
+	next:;
+	}
+	return 0;
+}
+
+static int hkHlMarkdown(const char *s, int n, unsigned char *hl, int st,
+                        const char *prev, int prevn, const char *next, int nextn) {
+	char ch;
+	if (st & MD_FM) {                                   /* --- yaml front matter --- */
+		if (n >= 3 && (!strncmp(s, "---", 3) || !strncmp(s, "...", 3)) && hkBlank(s + 3, n - 3)) {
+			hkMark(hl, 0, n, HL_DELIM);
+			return 0;
+		}
+		hkHlLine(hkSyntaxByName("yaml"), s, n, hl, 0, NULL, 0, NULL, 0);
+		return MD_FM;
+	}
+	if (st & MD_FENCE) {
+		int len = hkMdFence(s, n, &ch);
+		int i = hkIndent(s, n);
+		if (len >= MD_FLEN(st) && (ch == '~') == !!(st & MD_TILDE) && hkBlank(s + i + len, n - i - len)) {
+			hkMark(hl, 0, n, HL_DELIM);
+			return 0;
+		}
+		int lang = MD_LANG(st);
+		if (lang > 0 && lang <= HLDB_ENTRIES && HLDB[lang - 1].mode != HLM_MARKDOWN) {
+			int inner = hkHlLine(&HLDB[lang - 1], s, n, hl, st & 0xFFFF, NULL, 0, NULL, 0);
+			return (st & ~0xFFFF) | (inner & 0xFFFF);
+		}
+		hkMark(hl, 0, n, HL_CODE);
+		return st;
+	}
+	if (!prev && n >= 3 && !strncmp(s, "---", 3) && hkBlank(s + 3, n - 3)) {   /* first line */
+		hkMark(hl, 0, n, HL_DELIM);
+		return MD_FM;
+	}
+	if (st & 1) {                                        /* inside <!-- --> */
+		int e = -1;
+		for (int j = 0; j + 3 <= n; j++) if (!strncmp(s + j, "-->", 3)) { e = j + 3; break; }
+		if (e < 0) { hkMark(hl, 0, n, HL_COMMENT); return 1; }
+		hkMark(hl, 0, e, HL_COMMENT);
+		return hkMdInline(s, e, n, hl, 0);
+	}
+	if (hkBlank(s, n)) return 0;
+	int flen = hkMdFence(s, n, &ch);
+	if (flen) {
+		int i = hkIndent(s, n) + flen;
+		hkMark(hl, 0, n, HL_DELIM);
+		while (i < n && s[i] == ' ') i++;
+		int w = i;
+		char name[24];
+		while (i < n && s[i] != ' ' && s[i] != '{' && s[i] != ',' && i - w < 23) i++;
+		memcpy(name, s + w, i - w);
+		name[i - w] = '\0';
+		hkMark(hl, w, i, HL_KEYWORD2);
+		const struct editorSyntax *ls = name[0] ? hkSyntaxByName(name) : NULL;
+		int lang = ls ? (int)(ls - HLDB) + 1 : 0;
+		return MD_FENCE | (ch == '~' ? MD_TILDE : 0) | ((flen > 15 ? 15 : flen) << 18) | (lang << 22);
+	}
+	int i = hkIndent(s, n);
+	if (i <= 3 && s[i] == '#') {                         /* # heading */
+		int j = i;
+		while (j < n && s[j] == '#') j++;
+		if (j - i <= 6 && (j >= n || s[j] == ' ' || s[j] == '\t')) {
+			hkMark(hl, 0, n, HL_HEADING);
+			return 0;
+		}
+	}
+	if (hkMdUnderline(s, n) && hkMdParagraph(prev, prevn) && !(st & MD_TABLE)) {
+		hkMark(hl, 0, n, HL_HEADING);                    /* the === under a heading */
+		return 0;
+	}
+	if (hkMdRule(s, n)) {
+		hkMark(hl, 0, n, HL_DELIM);
+		return 0;
+	}
+	/* tables: the delimiter row, the rows after it, and the header above it */
+	int has_pipe = memchr(s, '|', n) != NULL;
+	if (has_pipe && hkMdTableDelim(s, n)) {
+		hkMark(hl, 0, n, HL_DELIM);
+		return MD_TABLE;
+	}
+	int header = has_pipe && next && hkMdTableDelim(next, nextn);
+	if (has_pipe && ((st & MD_TABLE) || header)) {
+		hkMdInline(s, 0, n, hl, header ? HL_STRONG : 0);
+		for (int j = 0; j < n; j++) {
+			if (s[j] == '|' && hl[j] != HL_CODE) hl[j] = HL_DELIM;
+			else if (header && hl[j] == HL_NORMAL) hl[j] = HL_STRONG;
+		}
+		return header ? 0 : MD_TABLE;
+	}
+	if (next && hkMdUnderline(next, nextn) && hkMdParagraph(s, n) && !(nextn > 0 && next[hkIndent(next, nextn)] == '-' && hkMdListMarker(next, nextn, hkIndent(next, nextn)))) {
+		hkMark(hl, 0, n, HL_HEADING);                    /* setext heading text */
+		return 0;
+	}
+	/* > quotes, then list markers and task boxes */
+	while (i < n && s[i] == '>') {
+		hl[i++] = HL_QUOTE;
+		while (i < n && s[i] == ' ') i++;
+	}
+	int m = hkMdListMarker(s, n, i);
+	if (m) {
+		hkMark(hl, i, i + m, HL_MARKER);
+		i += m;
+		while (i < n && s[i] == ' ') i++;
+		if (i + 2 < n && s[i] == '[' && (s[i + 1] == ' ' || s[i + 1] == 'x' || s[i + 1] == 'X') && s[i + 2] == ']') {
+			int done = s[i + 1] != ' ';
+			hkMark(hl, i, i + 3, HL_MARKER);
+			if (done) { hkMark(hl, i + 3, n, HL_DONE); return 0; }
+			i += 3;
+		}
+	}
+	return hkMdInline(s, i, n, hl, 0);
+}
+
+/* One line, by the syntax's own highlighter. prev/next: the lines around it,
+   for what only the neighbours decide (a setext heading, a table header). */
+static int hkHlLine(const struct editorSyntax *syn, const char *s, int n, unsigned char *hl, int st,
+                    const char *prev, int prevn, const char *next, int nextn) {
+	memset(hl, HL_NORMAL, n);
+	if (!syn) return 0;
+	switch (syn->mode) {
+	case HLM_MARKDOWN: return hkHlMarkdown(s, n, hl, st, prev, prevn, next, nextn);
+	case HLM_MARKUP:   return hkHlMarkup(s, n, hl, st);
+	case HLM_DIFF:     return hkHlDiff(s, n, hl);
+	default: break;
+	}
+	int out = hkHlCode(syn, s, n, hl, st);
+	if (syn->mode == HLM_INI && ST_KIND(st) == ST_NONE) hkHlIni(s, n, hl);
+	else if (syn->mode == HLM_YAML) hkHlYaml(s, n, hl);
+	else if (syn->mode == HLM_MAKE) hkHlMake(s, n, hl);
+	return out;
+}
+
+static const struct editorSyntax *hkSyntaxByName(const char *name) {
+	static const char *const alias[][2] = {
+		{"h", "c"}, {"cpp", "c++"}, {"cxx", "c++"}, {"cc", "c++"}, {"py", "python"}, {"python3", "python"},
+		{"js", "javascript"}, {"jsx", "javascript"}, {"node", "javascript"}, {"ts", "typescript"},
+		{"tsx", "typescript"}, {"sh", "shell"}, {"bash", "shell"}, {"zsh", "shell"}, {"console", "shell"},
+		{"shell-session", "shell"}, {"yml", "yaml"}, {"golang", "go"}, {"rs", "rust"}, {"rb", "ruby"},
+		{"kt", "kotlin"}, {"cs", "c#"}, {"csharp", "c#"}, {"make", "makefile"}, {"mk", "makefile"},
+		{"patch", "diff"}, {"svg", "xml"}, {"dockerfile", "docker"}, {"conf", "ini"}, {"cfg", "ini"},
+		{"asm", "assembly"}, {"md", "markdown"}, {"ex", "elixir"}, {"hs", "haskell"}, {"clj", "clojure"},
+		{"jl", "julia"}, {"ml", "ocaml"}, {"fs", "f#"}, {"fsharp", "f#"}, {"pl", "perl"}, {"hakorc", "hakorc"},
+	};
+	char low[32];
+	int k = 0;
+	for (; name[k] && k < 31; k++) low[k] = (char)tolower((unsigned char)name[k]);
+	low[k] = '\0';
+	for (int a = 0; a < (int)(sizeof(alias) / sizeof(alias[0])); a++)
+		if (!strcmp(low, alias[a][0])) { strcpy(low, alias[a][1]); break; }
+	for (int j = 0; j < HLDB_ENTRIES; j++)
+		if (!strcmp(HLDB[j].filetype, low)) return &HLDB[j];
+	return NULL;
+}
+
+/* by extension, or by the whole file name (Makefile, Dockerfile.dev, .bashrc) */
+static const struct editorSyntax *hkSyntaxForFile(const char *path) {
+	if (!path) return HL_TEXT;
+	const char *base = path;
+	for (const char *q = path; *q; q++) if (*q == '/') base = q + 1;
+	const char *ext = strrchr(base, '.');
+	for (int j = 0; j < HLDB_ENTRIES - 1; j++) {
+		for (int i = 0; HLDB[j].filematch[i]; i++) {
+			const char *m = HLDB[j].filematch[i];
+			size_t ml = strlen(m);
+			if (m[0] == '.' && ext && !strcasecmp(ext, m)) return &HLDB[j];
+			if (!strcmp(base, m)) return &HLDB[j];
+			if (m[0] != '.' && !strncmp(base, m, ml) && base[ml] == '.') return &HLDB[j];
+		}
+	}
+	return HL_TEXT;
+}
+
+/* #!/usr/bin/env python3 and friends */
+static const struct editorSyntax *hkSyntaxForShebang(const char *line) {
+	if (!line || line[0] != '#' || line[1] != '!') return NULL;
+	static const char *const map[][2] = {
+		{"python", "python"}, {"bash", "shell"}, {"zsh", "shell"}, {"/sh", "shell"}, {" sh", "shell"},
+		{"node", "javascript"}, {"perl", "perl"}, {"ruby", "ruby"}, {"lua", "lua"}, {"make", "makefile"},
+	};
+	for (int i = 0; i < (int)(sizeof(map) / sizeof(map[0])); i++)
+		if (strstr(line, map[i][0])) return hkSyntaxByName(map[i][1]);
+	return NULL;
+}
 
 
 /*** terminal ***/
@@ -1309,8 +2278,6 @@ void enableRawMode() {
 	if (E.mouse_enabled) {
 		if (write(STDOUT_FILENO, "\x1b[?1000h", 8) < 0) {}
 		if (write(STDOUT_FILENO, "\x1b[?1002h", 8) < 0) {}
-		if (write(STDOUT_FILENO, "\x1b[?1003h", 8) < 0) {}
-		if (write(STDOUT_FILENO, "\x1b[?1015h", 8) < 0) {}
 		if (write(STDOUT_FILENO, "\x1b[?1006h", 8) < 0) {}
 	}
 }
@@ -1355,7 +2322,16 @@ void abFree(struct abuf *ab) {
 
 /*** cell grid (diff-render) ***/
 static int gridColorEq(Color a, Color b) {
-	return a.r == b.r && a.g == b.g && a.b == b.b;
+	return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+static void gridAttrs(struct abuf *out, int at) {
+	char buf[24];
+	int n = snprintf(buf, sizeof(buf), "\x1b[0%s%s%s%s%s%sm",
+		(at & HK_A_BOLD) ? ";1" : "", (at & HK_A_DIM) ? ";2" : "",
+		(at & HK_A_ITALIC) ? ";3" : "", (at & HK_A_UNDER) ? ";4" : "",
+		(at & HK_A_REV) ? ";7" : "", (at & HK_A_STRIKE) ? ";9" : "");
+	abAppend(out, buf, n);
 }
 
 void gridResize(int w, int h) {
@@ -1454,9 +2430,9 @@ int gridPutCh(int x, int y, char c, Color fg, Color bg) {
 
 void gridFlush(struct abuf *out) {
 	if (!E.grid_back || !E.grid_front) return;
-	Color cur_fg = { -1, -1, -1 };
-	Color cur_bg = { -1, -1, -1 };
-	int cur_x = -1, cur_y = -1;
+	Color cur_fg = { -1, -1, -1, 0 };
+	Color cur_bg = { -1, -1, -1, 0 };
+	int cur_x = -1, cur_y = -1, cur_at = -1;
 	for (int y = 0; y < E.grid_h; y++) {
 		for (int x = 0; x < E.grid_w; x++) {
 			int idx = y * E.grid_w + x;
@@ -1474,6 +2450,12 @@ void gridFlush(struct abuf *out) {
 				abAppend(out, buf, strlen(buf));
 				cur_x = x;
 				cur_y = y;
+			}
+			int at = bk->fg.a | bk->bg.a;
+			if (at != cur_at) {               /* a reset drops the colors too */
+				gridAttrs(out, at);
+				cur_at = at;
+				cur_fg = cur_bg = (Color){ -1, -1, -1, 0 };
 			}
 			if (!gridColorEq(cur_fg, bk->fg)) {
 				setThemeColor(out, bk->fg);
@@ -1571,26 +2553,34 @@ static int utf8_display_width(const char *s) {
 	return col;
 }
 
-static void utf8_slice(const char *s, int start_col, int max_cols,
-                       int *out_off, int *out_len, int *out_cols) {
-	int col = 0, i = 0, n = s ? (int)strlen(s) : 0;
-	int off = n, end = n, cols = 0;
-	int found = 0;
-	while (i < n) {
-		int w = utf8_char_width(s, i);
-		if (!found && col >= start_col) { off = i; found = 1; }
-		if (found) {
-			if (cols + w > max_cols) break;
-			cols += w;
+/* A Rei history line wrapped at w cells, breaking after the last space that fits and mid-word only
+   when a word is longer than the row. Fills the sub-th row and returns 0; with sub < 0 returns the
+   row count. A wrapped row drops the space it broke on. */
+static int hkReiWrap(const char *s, int w, int sub, int *out_off, int *out_len, int *out_cols) {
+	int n = s ? (int)strlen(s) : 0, i = 0, rows = 0;
+	if (w < 1) w = 1;
+	do {
+		int j = i, c = 0, sp = -1, sp_c = 0;
+		while (j < n) {
+			int cw = utf8_char_width(s, j);
+			if (c + cw > w && c > 0) break;
+			if (s[j] == ' ') { sp = j; sp_c = c; }
+			c += cw;
+			j = utf8_next_char(s, j, n);
 		}
-		col += w;
-		i = utf8_next_char(s, i, n);
-		if (found) end = i;
-	}
-	if (!found) { off = n; end = n; }
-	if (out_off)  *out_off  = off;
-	if (out_len)  *out_len  = end - off;
-	if (out_cols) *out_cols = cols;
+		int end = j, cols = c, next = j;
+		if (j < n && sp > i) { end = sp; cols = sp_c; next = sp + 1; }
+		if (rows == sub) {
+			if (out_off) *out_off = i;
+			if (out_len) *out_len = end - i;
+			if (out_cols) *out_cols = cols;
+			return 0;
+		}
+		rows++;
+		i = next;
+	} while (i < n);
+	if (sub >= 0) { if (out_off) *out_off = n; if (out_len) *out_len = 0; if (out_cols) *out_cols = 0; return 0; }
+	return rows;
 }
 
 static int hkWrapWidth(editorPane *pane) {
@@ -1598,12 +2588,16 @@ static int hkWrapWidth(editorPane *pane) {
 	return w < 1 ? 1 : w;
 }
 
-/* Editor panes get a title bar so they match the framed Kami/Rei side panels
-   (the user's "board around each pane"). One row, stolen from the top; every
-   consumer of an editor leaf's geometry (draw, scroll, cursor, mouse) adds it.
-   0 when disabled or when the pane is too short to spare a row. */
+static int hkPaneCount(void) {
+	return E.num_panes + (E.left_panel != NULL) + (E.right_panel != NULL) + (E.bottom_panel != NULL);
+}
+
+/* With more than one pane, editor panes get a title bar so they match the framed
+   Kami/Rei side panels. One row, stolen from the top; every consumer of an editor
+   leaf's geometry (draw, scroll, cursor, mouse) adds it. A lone pane has none:
+   vim's look. 0 too when disabled or the pane is too short to spare a row. */
 static int hkPaneHdr(const editorPane *pane) {
-	if (!E.pane_titles || !pane || pane->type != PANE_EDITOR) return 0;
+	if (!E.pane_titles || !pane || pane->type != PANE_EDITOR || hkPaneCount() < 2) return 0;
 	return pane->height >= 4 ? 1 : 0;
 }
 
@@ -1717,9 +2711,20 @@ static int hkRgbTo256(Color c) {
 	return 16 + 36 * ri + 6 * gi + bi;
 }
 
+/* The profile's own colors: the default fg/bg, or one of its 16. */
+static int hkPaletteSeq(char *buf, size_t n, Color c, int bg) {
+	if (c.r == HK_COL_DEFAULT) return snprintf(buf, n, bg ? "\x1b[49m" : "\x1b[39m");
+	int i = c.g & 15;
+	return snprintf(buf, n, "\x1b[%dm", (i < 8 ? (bg ? 40 : 30) : (bg ? 100 : 90)) + (i & 7));
+}
+
 void setThemeColor(struct abuf *ab, Color color) {
 	char buf[32];
-	
+
+	if (color.r < 0) {
+		abAppend(ab, buf, hkPaletteSeq(buf, sizeof(buf), color, 0));
+		return;
+	}
 	if (E.term_type == TERM_TRUECOLOR) {
 		snprintf(buf, sizeof(buf), "\x1b[38;2;%d;%d;%dm", color.r, color.g, color.b);
 	} else if (E.term_type == TERM_XTERM_256) {
@@ -1751,7 +2756,11 @@ void setThemeColor(struct abuf *ab, Color color) {
 
 void setThemeBgColor(struct abuf *ab, Color color) {
 	char buf[32];
-	
+
+	if (color.r < 0) {
+		abAppend(ab, buf, hkPaletteSeq(buf, sizeof(buf), color, 1));
+		return;
+	}
 	if (E.term_type == TERM_TRUECOLOR) {
 		snprintf(buf, sizeof(buf), "\x1b[48;2;%d;%d;%dm", color.r, color.g, color.b);
 	} else if (E.term_type == TERM_XTERM_256) {
@@ -1775,14 +2784,24 @@ void setThemeBgColor(struct abuf *ab, Color color) {
    the comment/keyword/string slots each theme defines were never used. */
 Color editorSyntaxToRGB(int hl) {
 	const Theme *t = &E.theme;
+	Color c;
 	switch (hl) {
-	case HL_COMMENT: case HL_MLCOMMENT:                 return t->comment;
-	case HL_KEYWORD1: case HL_CONSTANT:                 return t->keyword1;
-	case HL_KEYWORD2: case HL_TYPE: case HL_LABEL:
-	case HL_PREPROCESSOR: case HL_MATCH:                return t->keyword2;
-	case HL_STRING: case HL_CHAR: case HL_ESCAPE:
-	case HL_NUMBER:                                     return t->string;
-	default:                                            return t->fg;
+	case HL_COMMENT: case HL_MLCOMMENT: case HL_DELIM:     return t->comment;
+	case HL_KEYWORD1: case HL_TAG: case HL_MARKER:         return t->keyword1;
+	case HL_KEYWORD2: case HL_TYPE: case HL_LABEL: case HL_PREPROCESSOR:
+	case HL_VARIABLE: case HL_ATTRNAME: case HL_KEY: case HL_QUOTE: return t->keyword2;
+	case HL_STRING: case HL_CHAR: case HL_CODE: case HL_DIFF_ADD: return t->string;
+	case HL_NUMBER: case HL_CONSTANT: case HL_ESCAPE:     return t->number;
+	case HL_DIFF_DEL:                                     return t->err;
+	case HL_HEADING:    c = t->keyword1; c.a |= HK_A_BOLD; return c;
+	case HL_STRONG:     c = t->fg; c.a |= HK_A_BOLD; return c;
+	case HL_EMPH:       c = t->fg; c.a |= HK_A_ITALIC; return c;
+	case HL_STRONGEMPH: c = t->fg; c.a |= HK_A_BOLD | HK_A_ITALIC; return c;
+	case HL_STRIKE:     c = t->comment; c.a |= HK_A_STRIKE; return c;
+	case HL_LINK:       c = t->keyword2; c.a |= HK_A_UNDER; return c;
+	case HL_URL:        c = t->comment; c.a |= HK_A_UNDER; return c;
+	case HL_DONE:       c = t->comment; c.a |= HK_A_STRIKE; return c;
+	default:                                              return t->fg;
 	}
 }
 
@@ -2288,7 +3307,6 @@ void editorSplitPane(int vertical) {
 	E.active_pane = new_pane;
 	E.num_panes++;
 	
-	editorSetStatusMessage("Split pane created");
 }
 
 void editorClosePane() {
@@ -2373,8 +3391,6 @@ void editorClosePane() {
 	leaf->is_focused = 1;
 	E.num_panes--;
 	E.force_window_command = 0;
-	
-	editorSetStatusMessage("Pane closed");
 }
 
 /* ctrl-w then 1-9 jumps to that editor window, r to Rei, k to Kami — the
@@ -2403,7 +3419,7 @@ static void editorFocusEditorN(int n) {
 	free(eds);
 }
 
-void editorNextPane() {
+static void editorCyclePane(int step) {
 	editorPane **all_panes = malloc(sizeof(editorPane*) * (MAX_PANES + 3));
 	int total = 0;
 	
@@ -2444,11 +3460,13 @@ void editorNextPane() {
 	if (E.active_pane) E.active_pane->is_focused = 0;
 	/* Focus not in the list (it should always be; a stale container once was):
 	   start from the first window instead of doing nothing. */
-	E.active_pane = all_panes[current_idx >= 0 ? (current_idx + 1) % total : 0];
+	E.active_pane = all_panes[current_idx >= 0 ? (current_idx + step + total) % total : 0];
 	E.active_pane->is_focused = 1;
 	
 	free(all_panes);
 }
+
+void editorNextPane() { editorCyclePane(1); }
 
 void editorResizePanes() {
 	if (!E.root_pane) return;
@@ -2561,147 +3579,51 @@ int editorRowRxToCx(erow *row, int rx) {
 	return cx;
 }
 
-void editorUpdateSyntax(erow *row) {
-	row->hl = realloc(row->hl, row->rsize);
+/* The row at idx, from the state the row above left. Search matches on top. */
+static int hkHlRow(editorPane *pane, int idx) {
+	erow *row = &pane->row[idx];
+	unsigned char *nhl = realloc(row->hl, row->rsize > 0 ? row->rsize : 1);
+	if (!nhl) return row->hl_open_comment;
+	row->hl = nhl;
 	memset(row->hl, HL_NORMAL, row->rsize);
-
-	editorPane *pane = E.active_pane;
-	if (!pane || pane->type != PANE_EDITOR || !pane->syntax) return;
-
-	char **keywords = pane->syntax->keywords;
-	char *scs = pane->syntax->singleline_comment_start;
-	char *mcs = pane->syntax->multiline_comment_start;
-	char *mce = pane->syntax->multiline_comment_end;
-
-	int scs_len = scs ? strlen(scs) : 0;
-	int mcs_len = mcs ? strlen(mcs) : 0;
-	int mce_len = mce ? strlen(mce) : 0;
-
-	int prev_sep = 1;
-	int in_string = 0;
-	int in_comment = (row->idx > 0 && pane->row[row->idx - 1].hl_open_comment);
-
-	int i = 0;
-	while (i < row->rsize) {
-		char c = row->render[i];
-		unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;
-
-		if (scs_len && !in_string && !in_comment) {
-			if (!strncmp(&row->render[i], scs, scs_len)) {
-				memset(&row->hl[i], HL_COMMENT, row->rsize - i);
-				break;
-			}
-		}
-
-		if (mcs_len && mce_len && !in_string) {
-			if (in_comment) {
-				row->hl[i] = HL_MLCOMMENT;
-				if (!strncmp(&row->render[i], mce, mce_len)) {
-					memset(&row->hl[i], HL_MLCOMMENT, mce_len);
-					i += mce_len;
-					in_comment = 0;
-					prev_sep = 1;
-					continue;
-				} else {
-					i++;
-					continue;
-				}
-			} else if (!strncmp(&row->render[i], mcs, mcs_len)) {
-				memset(&row->hl[i], HL_MLCOMMENT, mcs_len);
-				i += mcs_len;
-				in_comment = 1;
-				continue;
-			}
-		}
-
-		if (pane->syntax->flags & HL_HIGHLIGHT_STRINGS) {
-			if (in_string) {
-				row->hl[i] = HL_STRING;
-				if (c == '\\' && i + 1 < row->rsize) {
-					row->hl[i + 1] = HL_ESCAPE;
-					i += 2;
-					continue;
-				}
-				if (c == in_string) in_string = 0;
-				i++;
-				prev_sep = 1;
-				continue;
-			} else {
-				if (c == '"' || c == '\'') {
-					in_string = c;
-					row->hl[i] = HL_STRING;
-					i++;
-					continue;
-				}
-			}
-		}
-
-		if (pane->syntax->flags & HL_HIGHLIGHT_NUMBERS) {
-			if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) ||
-				(c == '.' && prev_hl == HL_NUMBER)) {
-				row->hl[i] = HL_NUMBER;
-				i++;
-				prev_sep = 0;
-				continue;
-			}
-		}
-
-		if (row->render[0] == '#' && pane->syntax == &HLDB[0]) {
-			int j = 0;
-			while (j < row->rsize && row->render[j] != ' ' && row->render[j] != '\t') {
-				row->hl[j] = HL_PREPROCESSOR;
-				j++;
-			}
-		}
-
-		if (strchr("+-*/%=<>!&|^~?:,;(){}[]", c)) {
-			row->hl[i] = (strchr("(){}[]", c)) ? HL_BRACKET : HL_OPERATOR;
-			i++;
-			prev_sep = 1;
-			continue;
-		}
-
-		if (prev_sep && keywords) {
-			int j;
-			for (j = 0; keywords[j]; j++) {
-				int klen = strlen(keywords[j]);
-				int kw2 = keywords[j][klen - 1] == '|';
-				if (kw2) klen--;
-
-				if (!strncmp(&row->render[i], keywords[j], klen) &&
-					is_separator(row->render[i + klen])) {
-					memset(&row->hl[i], kw2 ? HL_KEYWORD2 : HL_KEYWORD1, klen);
-					i += klen;
-					break;
-				}
-			}
-			if (keywords[j] != NULL) {
-				prev_sep = 0;
-				continue;
-			}
-		}
-
-		prev_sep = is_separator(c);
-		i++;
-	}
-
-	int changed = (row->hl_open_comment != in_comment);
-	row->hl_open_comment = in_comment;
-	if (changed && row->idx + 1 < pane->numrows)
-		editorUpdateSyntax(&pane->row[row->idx + 1]);
-
+	int in = idx > 0 ? pane->row[idx - 1].hl_open_comment : 0;
+	const char *prev = idx > 0 ? pane->row[idx - 1].render : NULL;
+	int prevn = idx > 0 ? pane->row[idx - 1].rsize : 0;
+	const char *next = idx + 1 < pane->numrows ? pane->row[idx + 1].render : NULL;
+	int nextn = next ? pane->row[idx + 1].rsize : 0;
+	int out = pane->syntax ? hkHlLine(pane->syntax, row->render, row->rsize, row->hl, in, prev, prevn, next, nextn) : 0;
 	if (E.search.query && E.search.query[0]) {
 		int qlen = strlen(E.search.query);
 		if (qlen > 0 && qlen <= row->rsize) {
 			char *m = strstr(row->render, E.search.query);
 			while (m) {
 				int pos = m - row->render;
-				for (int j = 0; j < qlen && pos + j < row->rsize; j++) {
-					row->hl[pos + j] = HL_MATCH;
-				}
+				for (int j = 0; j < qlen && pos + j < row->rsize; j++) row->hl[pos + j] = HL_MATCH;
 				m = strstr(m + 1, E.search.query);
 			}
 		}
+	}
+	return out;
+}
+
+/* Rows below follow while the state they start from changes: a loop, so an
+   opened comment at the top of a long file is no deep recursion. */
+void editorUpdateSyntax(erow *row) {
+	editorPane *pane = E.active_pane;
+	if (!pane || pane->type != PANE_EDITOR || !pane->row || row < pane->row || row - pane->row > pane->numrows) {
+		free(row->hl);
+		row->hl = calloc(row->rsize > 0 ? row->rsize : 1, 1);
+		return;
+	}
+	int idx = (int)(row - pane->row);
+	/* markdown: this line can make the one above a heading or a table header */
+	if (pane->syntax && pane->syntax->mode == HLM_MARKDOWN && idx > 0 && pane->row[idx - 1].hl) hkHlRow(pane, idx - 1);
+	for (;;) {
+		int before = pane->row[idx].hl_open_comment;
+		int out = hkHlRow(pane, idx);
+		pane->row[idx].hl_open_comment = out;
+		if (out == before || idx + 1 >= pane->numrows || !pane->row[idx + 1].hl) break;
+		idx++;
 	}
 }
 
@@ -2896,7 +3818,9 @@ void editorInsertNewLine() {
 		if (pane->cx > 0 || (pane->cx == 0 && row->size > 0 && isspace(row->chars[0]))) {
 			indent = editorGetIndent(row);
 			
-			if (E.smart_indent && row->size > 0 && E.is_pasting == 0) {
+			/* prose (markdown, plain text) ends lines in ':' and '(' all the time: keep its indent, add none */
+			int prose = !pane->syntax || pane->syntax->mode == HLM_MARKDOWN || !strcmp(pane->syntax->filetype, "text");
+			if (E.smart_indent && !prose && row->size > 0 && E.is_pasting == 0) {
 				int i = row->size - 1;
 				while (i >= 0 && isspace(row->chars[i])) i--;
 				
@@ -3658,28 +4582,15 @@ char *editorRowsToString(int *buflen) {
 void editorSelectSyntaxHighlight() {
 	editorPane *pane = E.active_pane;
 	if (!pane || pane->type != PANE_EDITOR) return;
-
-	pane->syntax = &HLDB[HLDB_ENTRIES - 1];
-	if (pane->filename == NULL) return;
-
-	char *ext = strrchr(pane->filename, '.');
-
-	for (unsigned int j = 0; j < HLDB_ENTRIES - 1; j++) {
-		struct editorSyntax *s = &HLDB[j];
-		unsigned int i = 0;
-		while (s->filematch[i]) {
-			int is_ext = (s->filematch[i][0] == '.');
-			if ((is_ext && ext && !strcasecmp(ext, s->filematch[i])) ||
-				(!is_ext && strstr(pane->filename, s->filematch[i]))) {
-				pane->syntax = s;
-				for (int filerow = 0; filerow < pane->numrows; filerow++) {
-					editorUpdateSyntax(&pane->row[filerow]);
-				}
-				return;
-			}
-			i++;
-		}
+	const struct editorSyntax *syn = hkSyntaxForFile(pane->filename);
+	if (syn == HL_TEXT && pane->numrows > 0) {
+		const struct editorSyntax *sb = hkSyntaxForShebang(pane->row[0].render);
+		if (sb) syn = sb;
 	}
+	if (pane->syntax == syn) return;
+	pane->syntax = (struct editorSyntax *)syn;
+	for (int i = 0; i < pane->numrows; i++) pane->row[i].hl_open_comment = 0;
+	for (int i = 0; i < pane->numrows; i++) pane->row[i].hl_open_comment = hkHlRow(pane, i);
 }
 
 void editorOpen(char *filename) {
@@ -3706,7 +4617,7 @@ void editorOpen(char *filename) {
 	if (!fp) {
 		if (errno == ENOENT) {
 			pane->dirty = 0;
-			editorSetStatusMessage("New file: %s", pane->filename);
+			editorSetStatusMessage("\"%s\" [New]", hkBaseName(pane->filename));
 			return;
 		} else {
 			editorSetStatusMessage("Error opening file: %s", strerror(errno));
@@ -3729,7 +4640,9 @@ void editorOpen(char *filename) {
 	char *line = NULL;
 	size_t linecap = 0;
 	ssize_t linelen;
+	long bytes = 0;
 	while ((linelen = getline(&line, &linecap, fp)) != -1) {
+		bytes += linelen;
 		while (linelen > 0 && (line[linelen - 1] == '\n' ||
 							   line[linelen - 1] == '\r'))
 			linelen--;
@@ -3737,6 +4650,8 @@ void editorOpen(char *filename) {
 	}
 	free(line);
 	fclose(fp);
+	if (pane->syntax == HL_TEXT) editorSelectSyntaxHighlight();     /* #! decides */
+	editorSetStatusMessage("\"%s\" %dL, %ldB", hkBaseName(pane->filename), pane->numrows, bytes);
 	pane->dirty = 0;
 	pane->file_mtime = hkFileMtime(pane->filename);
 	pane->disk_warned = 0;
@@ -3802,6 +4717,35 @@ void editorSave(int force) {
 }
 
 /*** drawing ***/
+/* The start screen with no file, the way vim does it: the ~ rows, and a few
+   lines in the middle that go away on the first key. */
+static void hkDrawIntro(editorPane *pane) {
+	static const char *const vim[] = {"i", "to insert", ":w <file>", "to save", ":q", "to quit", ":help", "for help", NULL};
+	static const char *const emacs[] = {"C-x C-f", "to open a file", "C-x C-s", "to save", "C-x C-c", "to quit", "M-x help", "for help", NULL};
+	static const char *const nano[] = {"^O", "to write out", "^X", "to exit", "^G", "for help", "^T", "for a :command", NULL};
+	const char *const *keys = E.keymode == HK_KEYS_EMACS ? emacs : E.keymode == HK_KEYS_NANO ? nano : vim;
+	int n = 0;
+	while (keys[n]) n += 2;
+	n /= 2;
+	int h = 3 + n;
+	if (pane->height < h + 2 || pane->width < 36) return;
+	int top = pane->y + (pane->height - h) / 2;
+	char title[64];
+	snprintf(title, sizeof(title), "hake v%s", HAKE_VERSION);
+	Color strong = E.theme.fg, dim = E.theme.line_number;
+	strong.a |= HK_A_BOLD;
+	int tw = (int)strlen(title);
+	gridPutStr(pane->x + (pane->width - tw) / 2, top, title, tw, strong, E.theme.bg);
+	const char *sub = "the hako editor";
+	gridPutStr(pane->x + (pane->width - (int)strlen(sub)) / 2, top + 1, sub, (int)strlen(sub), dim, E.theme.bg);
+	int lw = 32, lx = pane->x + (pane->width - lw) / 2;
+	for (int i = 0; i < n; i++) {
+		char line[64];
+		snprintf(line, sizeof(line), "type  %-10s %s", keys[i * 2], keys[i * 2 + 1]);
+		gridPutStr(lx, top + 3 + i, line, pane->width - (lx - pane->x), dim, E.theme.bg);
+	}
+}
+
 void editorDrawPane(editorPane *pane, struct abuf *ab) {
 	(void)ab;
 	if (!pane) return;
@@ -3845,11 +4789,11 @@ void editorDrawPane(editorPane *pane, struct abuf *ab) {
 	int wrap_width = hkWrapWidth(pane);
 	int hdr = hkPaneHdr(pane);
 	if (hdr) {
-		/* title bar: 箱 <basename>, matching the Kami/Rei panels */
+		/* title bar: <basename>, matching the Kami/Rei panels */
 		const char *base = hkBaseName(pane->filename);
 		if (!*base) base = "[No Name]";
 		char title[128];
-		snprintf(title, sizeof(title), " \xE7\xAE\xB1 %s%s", base, pane->dirty ? " \xE2\x80\xA2" : "");
+		snprintf(title, sizeof(title), " %s%s", base, pane->dirty ? " \xE2\x80\xA2" : "");
 		Color hf = (pane == E.active_pane) ? E.theme.status_fg : E.theme.line_number;
 		Color hb = E.theme.status_bg;
 		int used = gridPutStr(pane->x, pane->y, title, pane->width, hf, hb);
@@ -3907,11 +4851,15 @@ void editorDrawPane(editorPane *pane, struct abuf *ab) {
 
 				Color cell_bg = is_selected ? E.theme.visual_bg : E.theme.bg;
 				Color cell_fg;
-				if (row->hl && j < row->rsize && row->hl[j] != HL_NORMAL) {
+				if (row->hl && j < row->rsize && row->hl[j] == HL_MATCH) {
+					cell_fg = E.theme.visual_fg;          /* a search match: drawn like a selection */
+					cell_bg = E.theme.visual_bg;
+				} else if (row->hl && j < row->rsize && row->hl[j] != HL_NORMAL) {
 					cell_fg = editorSyntaxToRGB(row->hl[j]);
 				} else {
 					cell_fg = E.theme.fg;
 				}
+				if (is_selected) cell_fg.a &= ~HK_A_REV;  /* the selection's own reverse is enough */
 
 				if (j < row->rsize) {
 					unsigned char c = row->render[j];
@@ -3956,6 +4904,7 @@ void editorDrawPane(editorPane *pane, struct abuf *ab) {
 			}
 		}
 	}
+	if (E.intro_active && pane->numrows == 0 && !pane->filename && hkPaneCount() == 1) hkDrawIntro(pane);
 }
 
 /*** input ***/
@@ -4138,16 +5087,19 @@ int editorReadKey() {
 
 		return '\x1b';
 	} else {
-		return c;
+		return c == 0 ? CTRL_SPACE_KEY : c;     /* ctrl-space sends NUL: emacs's set-mark */
 	}
 }
 
-char *editorPrompt(char *prompt, void (*callback)(char *, int)) {
-	size_t bufsize = 128;
+/* A one-line prompt in the message line. init: the text it starts with.
+   Esc, ctrl-c or ctrl-g cancel (NULL). */
+static char *hkPromptWith(const char *prompt, const char *init, void (*callback)(char *, int)) {
+	size_t bufsize = 128, buflen = 0;
+	if (init && strlen(init) + 1 > bufsize) bufsize = strlen(init) + 64;
 	char *buf = malloc(bufsize);
-
-	size_t buflen = 0;
+	if (!buf) return NULL;
 	buf[0] = '\0';
+	if (init) { strcpy(buf, init); buflen = strlen(init); }
 
 	while (1) {
 		editorSetStatusMessage(prompt, buf);
@@ -4156,7 +5108,7 @@ char *editorPrompt(char *prompt, void (*callback)(char *, int)) {
 		int c = editorReadKey();
 		if (c == DEL_KEY || c == CTRL_KEY('h') || c == BACKSPACE) {
 			if (buflen != 0) buf[--buflen] = '\0';
-		} else if (c == '\x1b') {
+		} else if (c == '\x1b' || c == CTRL_KEY('c') || c == CTRL_KEY('g')) {
 			editorSetStatusMessage("");
 			if (callback) callback(buf, c);
 			free(buf);
@@ -4167,16 +5119,25 @@ char *editorPrompt(char *prompt, void (*callback)(char *, int)) {
 				if (callback) callback(buf, c);
 				return buf;
 			}
-		} else if (!iscntrl(c) && c < 128) {
+		} else if (c == CTRL_KEY('u')) {
+			buflen = 0;
+			buf[0] = '\0';
+		} else if (c >= 32 && c < 256 && c != 127) {
 			if (buflen == bufsize - 1) {
 				bufsize *= 2;
-				buf = realloc(buf, bufsize);
+				char *nb = realloc(buf, bufsize);
+				if (!nb) { free(buf); return NULL; }
+				buf = nb;
 			}
 			buf[buflen++] = c;
 			buf[buflen] = '\0';
 		}
 		if (callback) callback(buf, c);
 	}
+}
+
+char *editorPrompt(char *prompt, void (*callback)(char *, int)) {
+	return hkPromptWith(prompt, NULL, callback);
 }
 
 void editorSetStatusMessage(const char *fmt, ...) {
@@ -4344,6 +5305,64 @@ void editorSetMode(enum editorMode mode) {
 	if (cursor_seq && write(STDOUT_FILENO, cursor_seq, strlen(cursor_seq)) < 0) {}
 }
 
+/* :e, :config, C-x C-f, ^R: a directory opens the explorer there; a file opens
+   in the editor pane, or beside it when that buffer has unsaved changes. */
+static void hkOpenPath(const char *path) {
+	char expanded[PATH_MAX], resolved[PATH_MAX];
+	const char *filename = path;
+	if (filename[0] == '~') {
+		const char *home = getenv("HOME");
+		if (home) {
+			snprintf(expanded, sizeof(expanded), "%s%s", home, filename + 1);
+			filename = expanded;
+		}
+	}
+#ifndef _WIN32
+	if (realpath(filename, resolved)) {
+		filename = resolved;
+	} else if (filename[0] != '/') {
+		char cwd[PATH_MAX];
+		if (getcwd(cwd, sizeof(cwd))) {
+			int rn = snprintf(resolved, sizeof(resolved), "%s/%s", cwd, filename);
+			if (rn > 0 && (size_t)rn < sizeof(resolved)) filename = resolved;   /* never a clipped path */
+		}
+	}
+#else
+	if (_fullpath(resolved, filename, PATH_MAX)) filename = resolved;
+#endif
+	struct stat est;
+	if (stat(filename, &est) == 0 && S_ISDIR(est.st_mode)) {
+		if (!E.left_panel) editorToggleExplorer();
+		if (E.left_panel && E.left_panel->type == PANE_EXPLORER && E.left_panel->explorer) {
+			explorerData *ed = E.left_panel->explorer;
+			free(ed->current_dir);
+			ed->current_dir = strdup(filename);
+			ed->selected = 0;
+			ed->scroll_offset = 0;
+			explorerRefresh(E.left_panel);
+			E.active_pane = E.left_panel;
+			E.left_panel->is_focused = 1;
+			editorSetStatusMessage("Explorer: %s", filename);
+		}
+		return;
+	}
+	editorPane *target = (E.active_pane && E.active_pane->type == PANE_EDITOR) ? E.active_pane : hkFirstEditorLeaf();
+	if (!target) { editorSetStatusMessage("No editor pane"); return; }
+	if (target->filename && strcmp(target->filename, filename) == 0 && !target->dirty) {
+		E.active_pane = target;
+		return;
+	}
+	if (target->dirty) {
+		E.active_pane = target;
+		if (explorerOpenInSplit(filename) != 1)
+			editorSetStatusMessage("unsaved changes: :w first (or :e! to drop them)");
+		return;
+	}
+	E.active_pane = target;
+	hkResetPaneBuffer(target);
+	editorOpen((char *)filename);
+}
+
 void editorColonCommand() {
 	char *cmd = editorPrompt(":%s", NULL);
 	if (cmd == NULL) return;
@@ -4485,87 +5504,60 @@ static void editorRunColon(char *cmd) {
 		if (!pane || !pane->dirty) {
 			exit(0);
 		}
+	} else if (strcmp(cmd, "console") == 0 || strcmp(cmd, "term") == 0) {
+		hkConsoleToggle();
+	} else if (strcmp(cmd, "undo") == 0) {
+		editorUndo();
+	} else if (strcmp(cmd, "redo") == 0) {
+		editorRedo();
+	} else if (strcmp(cmd, "voice") == 0 || strncmp(cmd, "voice ", 6) == 0) {
+		hkAgentSlash(cmd);
 	} else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "h") == 0) {
 		editorPopupOpenHelp();
 	} else if (strcmp(cmd, "split") == 0 || strcmp(cmd, "sp") == 0) {
 		editorSplitPane(0);
 	} else if (strcmp(cmd, "vsplit") == 0 || strcmp(cmd, "vs") == 0) {
 		editorSplitPane(1);
+	} else if (strncmp(cmd, "split ", 6) == 0 || strncmp(cmd, "sp ", 3) == 0
+	           || strncmp(cmd, "vsplit ", 7) == 0 || strncmp(cmd, "vs ", 3) == 0) {
+		/* vim's :sp file / :vs file: split, then open the file in the new pane */
+		const char *filename = strchr(cmd, ' ');
+		while (*filename == ' ') filename++;
+		int before = E.num_panes;
+		editorSplitPane(cmd[0] == 'v');
+		if (*filename && E.num_panes > before) hkOpenPath(filename);
 	} else if (strcmp(cmd, "explorer") == 0 || strcmp(cmd, "Explorer") == 0 || strcmp(cmd, "ex") == 0
 	           || strcmp(cmd, "kami") == 0) {
 		editorToggleExplorer();
 	} else if (strcmp(cmd, "rei") == 0 || strcmp(cmd, "ai") == 0) {
 		editorToggleAI();
-	} else if (strcmp(cmd, "config") == 0 || strcmp(cmd, "genconfig") == 0) {
+	} else if (strcmp(cmd, "config") == 0) {
 		editorGenerateConfig();
+	} else if (strncmp(cmd, "config ", 7) == 0) {
+		hkConfigSet(cmd + 7, 1);
+	} else if (strncmp(cmd, "set ", 4) == 0) {
+		const char *a = cmd + 4;
+		while (*a == ' ') a++;
+		if      (!strcmp(a, "nu") || !strcmp(a, "number"))     hkConfigSet("show_line_numbers=1", 0);
+		else if (!strcmp(a, "nonu") || !strcmp(a, "nonumber")) hkConfigSet("show_line_numbers=0", 0);
+		else if (!strcmp(a, "rnu") || !strcmp(a, "relativenumber")) hkConfigSet("show_line_numbers=2", 0);
+		else if (!strcmp(a, "wrap"))   hkConfigSet("word_wrap=1", 0);
+		else if (!strcmp(a, "nowrap")) hkConfigSet("word_wrap=0", 0);
+		else hkConfigSet(a, 0);
 	} else if (strcmp(cmd, "theme") == 0 || strcmp(cmd, "colorscheme") == 0) {
 		editorPopupOpenThemes();
 	} else if (strncmp(cmd, "theme ", 6) == 0 || strncmp(cmd, "colorscheme ", 12) == 0) {
 		const char *name = strchr(cmd, ' ');
 		if (name) {
 			while (*name == ' ') name++;
-			if (editorApplyThemeByName(name)) {
-				editorSetStatusMessage("theme: %s", name);
-			} else {
-				editorSetStatusMessage("unknown theme: %s", name);
-			}
+			if (editorApplyThemeByName(name)) hkSaveTheme(name);
+			else editorSetStatusMessage("unknown theme: %s", name);
 		}
-	} else if (strncmp(cmd, "open ", 5) == 0 || strncmp(cmd, "e ", 2) == 0) {
-		char *filename = cmd + (cmd[0] == 'o' ? 5 : 2);
+	} else if (strncmp(cmd, "open ", 5) == 0 || strncmp(cmd, "e ", 2) == 0 || strncmp(cmd, "edit ", 5) == 0) {
+		const char *filename = strchr(cmd, ' ');
 		while (*filename == ' ') filename++;
-
-		char expanded[PATH_MAX];
-		if (filename[0] == '~') {
-			const char *home = getenv("HOME");
-			if (home) {
-				snprintf(expanded, sizeof(expanded), "%s%s", home, filename + 1);
-				filename = expanded;
-			}
-		}
-
-		char resolved[PATH_MAX];
-		if (*filename) {
-#ifndef _WIN32
-			char *rp = realpath(filename, resolved);
-			if (rp) {
-				filename = resolved;
-			} else if (filename[0] != '/') {
-				char cwd[PATH_MAX];
-				if (getcwd(cwd, sizeof(cwd))) {
-					int rn = snprintf(resolved, sizeof(resolved), "%s/%s", cwd, filename);
-					if (rn > 0 && (size_t)rn < sizeof(resolved)) filename = resolved;   /* never a clipped path */
-				}
-			}
-#else
-			char rp[PATH_MAX];
-			if (_fullpath(rp, filename, PATH_MAX)) {
-				strncpy(resolved, rp, sizeof(resolved));
-				resolved[sizeof(resolved) - 1] = '\0';
-				filename = resolved;
-			}
-#endif
-		}
-
-		struct stat est;
-		if (*filename && stat(filename, &est) == 0 && S_ISDIR(est.st_mode)) {
-			if (!E.left_panel) editorToggleExplorer();
-			if (E.left_panel && E.left_panel->type == PANE_EXPLORER && E.left_panel->explorer) {
-				explorerData *ed = E.left_panel->explorer;
-				free(ed->current_dir);
-				ed->current_dir = strdup(filename);
-				ed->selected = 0;
-				ed->scroll_offset = 0;
-				explorerRefresh(E.left_panel);
-				E.active_pane = E.left_panel;
-				E.left_panel->is_focused = 1;
-				editorSetStatusMessage("Explorer: %s", filename);
-			}
-		} else if (*filename && pane && pane->type == PANE_EDITOR) {
-			hkResetPaneBuffer(pane);
-			editorOpen(filename);
-		} else {
-			editorSetStatusMessage("Usage: :e <filename>");
-		}
+		if (*filename) hkOpenPath(filename);
+		else editorSetStatusMessage("Usage: :e <filename>");
 	} else if (strncmp(cmd, "s/", 2) == 0 || strncmp(cmd, "%s/", 3) == 0 ||
 			   strncmp(cmd, ".s/", 3) == 0) {
 		if (!pane || pane->type != PANE_EDITOR) {
@@ -4688,8 +5680,42 @@ void editorDrawRows(struct abuf *ab) {
 	}
 }
 
+static const char *hkKeymodeName(void) {
+	return E.keymode == HK_KEYS_EMACS ? "emacs" : E.keymode == HK_KEYS_NANO ? "nano" : "";
+}
+
+/* What the editor pane under the cursor says about itself: name, modified,
+   filetype, position, key mode. Shared by the status bar and the ruler. */
+static void hkPaneInfo(editorPane *pane, char *left, size_t lsz, char *right, size_t rsz, int with_name) {
+	left[0] = right[0] = '\0';
+	const char *km = hkKeymodeName();
+	if (pane && pane->type == PANE_EDITOR) {
+		const char *base = hkBaseName(pane->filename);
+		if (!*base) base = "[No Name]";
+		if (with_name) snprintf(left, lsz, " %.40s%s", base, pane->dirty ? " [+]" : "");
+		else snprintf(left, lsz, "%s", pane->dirty ? " [+]" : "");
+		snprintf(right, rsz, "%s%s%s  %d,%d ", km, *km ? "  " : "",
+			pane->syntax ? pane->syntax->filetype : "text", pane->cy + 1, pane->cx + 1);
+	} else if (pane && pane->type == PANE_EXPLORER) {
+		explorerData *data = pane->explorer;
+		snprintf(left, lsz, " %s: %.60s", E.explorer_name, data && data->current_dir ? data->current_dir : "/");
+		if (data && data->num_entries > 0 && data->selected >= 0 && data->selected < data->num_entries)
+			snprintf(right, rsz, "%d/%d ", data->selected + 1, data->num_entries);
+	} else if (pane && pane->type == PANE_AI) {
+		aiData *data = pane->ai;
+		snprintf(left, lsz, " %s: %s", E.ai_name, data && data->mode == MODE_INSERT ? "typing" : "ready");
+		if (data && data->history_count > 0) snprintf(right, rsz, "%d lines ", data->history_count);
+	} else if (pane && pane->type == PANE_RUNNER && pane->runner) {
+		runnerData *r = pane->runner;
+		snprintf(left, lsz, " %s %.40s %s", r->console ? "$" : "\xe2\x96\xb6",
+			r->console ? (r->running ? r->cmd : "console") : r->cmd, r->running ? "[running]" : "");
+		if (r->count > 0) snprintf(right, rsz, "%d/%d ", r->selected + 1, r->count);
+	}
+}
+
 void editorDrawStatusBar(struct abuf *ab) {
 	(void)ab;
+	if (!E.status_shown) return;
 	int gy = E.screenrows;
 	Color sb_bg = E.theme.status_bg;
 	Color sb_fg = E.theme.status_fg;
@@ -4698,52 +5724,11 @@ void editorDrawStatusBar(struct abuf *ab) {
 		gridPutCh(i, gy, ' ', sb_fg, sb_bg);
 	}
 
+	char status[128], rstatus[128];
 	editorPane *pane = E.active_pane;
-	char status[80], rstatus[80];
-	int len = 0, rlen = 0;
-
-	if (pane && pane->type == PANE_EDITOR) {
-		const char *display_name = pane->filename;
-		if (display_name) {
-			const char *slash = strrchr(display_name, '/');
-			if (slash) display_name = slash + 1;
-		}
-		if (hkPaneHdr(pane)) {
-			/* the name is in the pane's title bar already; the bottom bar keeps
-			   only the modified flag so it is not doubled. */
-			len = snprintf(status, sizeof(status), " %s", pane->dirty ? "[+] modified" : "");
-		} else {
-			len = snprintf(status, sizeof(status), " %.20s %s",
-				display_name ? display_name : "[No Name]",
-				pane->dirty ? "[+]" : "");
-		}
-		rlen = snprintf(rstatus, sizeof(rstatus), "%s | %d:%d ",
-			pane->syntax ? pane->syntax->filetype : "text",
-			pane->cy + 1, pane->cx + 1);
-	} else if (pane && pane->type == PANE_EXPLORER) {
-		explorerData *data = pane->explorer;
-		len = snprintf(status, sizeof(status), " %s %s: %.60s",
-			E.explorer_kanji, E.explorer_name,
-			data && data->current_dir ? data->current_dir : "/");
-		if (data && data->num_entries > 0 && data->selected >= 0 && data->selected < data->num_entries) {
-			rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d ",
-				data->selected + 1, data->num_entries);
-		}
-	} else if (pane && pane->type == PANE_AI) {
-		aiData *data = pane->ai;
-		len = snprintf(status, sizeof(status), " %s %s: %s",
-			E.ai_kanji, E.ai_name,
-			data && data->mode == MODE_INSERT ? "Listening..." : "Ready");
-		if (data && data->history_count > 0) {
-			rlen = snprintf(rstatus, sizeof(rstatus), "%d messages ", data->history_count);
-		}
-	} else if (pane && pane->type == PANE_RUNNER && pane->runner) {
-		runnerData *r = pane->runner;
-		len = snprintf(status, sizeof(status), " \xe2\x96\xb6 %.40s %s", r->cmd,
-			r->running ? "[running]" : "");
-		if (r->count > 0) rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d ", r->selected + 1, r->count);
-	}
-
+	/* the name is in the pane's title bar when it has one; not doubled here */
+	hkPaneInfo(pane, status, sizeof(status), rstatus, sizeof(rstatus), !hkPaneHdr(pane));
+	int len = (int)strlen(status), rlen = (int)strlen(rstatus);
 	if (len > E.screencols) len = E.screencols;
 	if (len > 0) gridPutStr(0, gy, status, len, sb_fg, sb_bg);
 	if (rlen > 0 && rlen <= E.screencols - len) {
@@ -4751,9 +5736,11 @@ void editorDrawStatusBar(struct abuf *ab) {
 	}
 }
 
+static void hkDrawNanoBar(int gy);
+
 void editorDrawMessageBar(struct abuf *ab) {
 	(void)ab;
-	int gy = E.screenrows + 1;
+	int gy = E.screenrows + E.status_shown;
 	Color msg_bg = E.theme.bg;           /* a fixed dark grey hid the text on every light theme */
 	Color msg_fg = E.theme.fg;
 
@@ -4761,22 +5748,35 @@ void editorDrawMessageBar(struct abuf *ab) {
 		gridPutCh(i, gy, ' ', msg_fg, msg_bg);
 	}
 
+	/* No status bar (one window, the vim default): the ruler sits at the right. */
+	int rlen = 0;
+	if (!E.status_shown) {
+		char l[128], r[128], ruler[256];
+		hkPaneInfo(E.active_pane, l, sizeof(l), r, sizeof(r), 1);
+		snprintf(ruler, sizeof(ruler), "%s   %s", l + (l[0] == ' '), r);
+		rlen = utf8_display_width(ruler);
+		if (rlen < E.screencols / 2 + 8 && rlen < E.screencols) gridPutStr(E.screencols - rlen, gy, ruler, rlen, E.theme.line_number, msg_bg);
+		else rlen = 0;
+	}
+
+	int room = E.screencols - (rlen ? rlen + 1 : 0);
 	int msglen = strlen(E.statusmsg);
-	if (msglen > E.screencols) msglen = E.screencols;
-	if (msglen && time(NULL) - E.statusmsg_time < 5) {
+	if (msglen > room) msglen = room;
+	if (msglen > 0 && time(NULL) - E.statusmsg_time < 5) {
 		gridPutStr(0, gy, E.statusmsg, msglen, msg_fg, msg_bg);
-	} else {
+	} else if (E.keymode == HK_KEYS_VIM && E.active_pane && E.active_pane->type == PANE_EDITOR) {
 		const char *mode_str = "";
 		switch (E.mode) {
-		case MODE_NORMAL: mode_str = "-- NORMAL --"; break;
+		case MODE_NORMAL: mode_str = ""; break;   /* vim says nothing in normal mode */
 		case MODE_INSERT: mode_str = "-- INSERT --"; break;
 		case MODE_VISUAL: mode_str = "-- VISUAL --"; break;
 		case MODE_VISUAL_LINE: mode_str = "-- VISUAL LINE --"; break;
 		}
-		int mlen = strlen(mode_str);
-		if (mlen > E.screencols) mlen = E.screencols;
-		gridPutStr(0, gy, mode_str, mlen, msg_fg, msg_bg);
+		Color bold = msg_fg;
+		bold.a |= HK_A_BOLD;
+		gridPutStr(0, gy, mode_str, room, bold, msg_bg);
 	}
+	if (E.keymode == HK_KEYS_NANO) hkDrawNanoBar(gy + 1);
 }
 
 static int aiPromptSegs(aiData *data, int seg_w, int **out_start, int **out_end) {
@@ -4818,11 +5818,6 @@ static int aiPromptSegs(aiData *data, int seg_w, int **out_start, int **out_end)
 }
 
 void editorRefreshScreen() {
-	if (E.splash_active) {
-		editorDrawSplash();
-		return;
-	}
-
 #ifndef _WIN32
 	if (winch_received) {
 		winch_received = 0;
@@ -4908,6 +5903,12 @@ void editorRefreshScreen() {
 		int col = pane->x + 2;
 		char buf[32];
 		snprintf(buf, sizeof(buf), "\x1b[%d;%dH", row, col);
+		abAppend(&ab, buf, strlen(buf));
+	} else if (pane && pane->type == PANE_RUNNER && pane->runner && pane->runner->console) {
+		runnerData *r = pane->runner;
+		int col = pane->x + 2 + utf8_display_width(r->input) - (r->input_len > 0 ? utf8_display_width(r->input + r->input_cur) : 0);
+		char buf[32];
+		snprintf(buf, sizeof(buf), "\x1b[%d;%dH", pane->y + pane->height, col + 1);
 		abAppend(&ab, buf, strlen(buf));
 	} else if (pane && pane->type == PANE_AI && pane->ai) {
 		aiData *adata = pane->ai;
@@ -5285,6 +6286,624 @@ void hkClampCursor(editorPane *pane) {
 	if (pane->cx < 0) pane->cx = 0;
 }
 
+/*** key modes: emacs and nano ***/
+/* Modeless typing for both. The mark (emacs C-SPC, nano M-A) is the visual
+   selection underneath, so the region draws like one. A region runs from the
+   mark to the cursor, the cursor's character not included. */
+static int hk_last_kill;            /* the previous key cut text: the next cut adds to it */
+static char hk_last_search[256];
+
+static int hkRegion(editorPane *p, int *sy, int *sx, int *ey, int *ex) {
+	if (E.mode != MODE_VISUAL) return 0;
+	int ay = p->visual_anchor_y, ax = p->visual_anchor_x;
+	if (ay > p->cy || (ay == p->cy && ax > p->cx)) { *sy = p->cy; *sx = p->cx; *ey = ay; *ex = ax; }
+	else { *sy = ay; *sx = ax; *ey = p->cy; *ex = p->cx; }
+	if (*ey >= p->numrows) { *ey = p->numrows - 1; *ex = p->row[*ey].size; }
+	if (*sx > p->row[*sy].size) *sx = p->row[*sy].size;
+	if (*ex > p->row[*ey].size) *ex = p->row[*ey].size;
+	return *sy != *ey || *sx != *ex;
+}
+
+static char *hkRangeText(editorPane *p, int sy, int sx, int ey, int ex, int *len) {
+	size_t total = 0;
+	for (int y = sy; y <= ey; y++) total += p->row[y].size + 1;
+	char *out = malloc(total + 1), *o = out;
+	if (!out) { *len = 0; return NULL; }
+	for (int y = sy; y <= ey; y++) {
+		int a = y == sy ? sx : 0, b = y == ey ? ex : p->row[y].size;
+		if (b > a) { memcpy(o, p->row[y].chars + a, b - a); o += b - a; }
+		if (y < ey) *o++ = '\n';
+	}
+	*o = '\0';
+	*len = (int)(o - out);
+	return out;
+}
+
+static void hkDeleteRange(editorPane *p, int sy, int sx, int ey, int ex) {
+	erow *r = &p->row[sy];
+	if (sy == ey) {
+		memmove(r->chars + sx, r->chars + ex, r->size - ex + 1);
+		r->size -= ex - sx;
+		editorUpdateRow(r);
+	} else {
+		erow *last = &p->row[ey];
+		int tail = last->size - ex;
+		char *nc = malloc(sx + tail + 1);
+		if (!nc) return;
+		memcpy(nc, r->chars, sx);
+		memcpy(nc + sx, last->chars + ex, tail);
+		nc[sx + tail] = '\0';
+		free(r->chars);
+		r->chars = nc;
+		r->size = sx + tail;
+		editorUpdateRow(r);
+		for (int y = ey; y > sy; y--) editorDelRow(y);
+	}
+	p->dirty++;
+	p->cy = sy;
+	p->cx = sx;
+}
+
+/* kill or cut: into the unnamed register, after the last cut when they run on */
+static void hkKill(const char *text, int len, int is_line, int append) {
+	if (append && E.paste.data && E.paste.len > 0) {
+		char *both = malloc(E.paste.len + len + 1);
+		if (!both) return;
+		memcpy(both, E.paste.data, E.paste.len);
+		memcpy(both + E.paste.len, text, len);
+		hkSetRegister(0, both, E.paste.len + len, is_line, 0);
+		free(both);
+	} else {
+		hkSetRegister(0, text, len, is_line, 0);
+	}
+}
+
+static void hkMarkSet(editorPane *p, int on) {
+	if (on) {
+		p->visual_anchor_x = p->cx;
+		p->visual_anchor_y = p->cy;
+		E.mode = MODE_VISUAL;
+		editorSetStatusMessage("Mark set");
+	} else {
+		E.mode = MODE_INSERT;
+	}
+}
+
+/* cut the region, or (nano ^K, emacs C-k) a line */
+static void hkCutRegion(editorPane *p, int copy_only) {
+	int sy, sx, ey, ex, len;
+	if (!hkRegion(p, &sy, &sx, &ey, &ex)) { hkMarkSet(p, 0); return; }
+	char *t = hkRangeText(p, sy, sx, ey, ex, &len);
+	if (t) { hkKill(t, len, 0, 0); free(t); }
+	if (!copy_only) { editorSaveState(); hkDeleteRange(p, sy, sx, ey, ex); }
+	hkMarkSet(p, 0);
+	editorSetStatusMessage(copy_only ? "Copied %d bytes" : "Cut %d bytes", len);
+}
+
+static void hkYank(editorPane *p) {
+	pasteBuffer *pb = hkGetRegister(0);
+	if (!pb || !pb->data || pb->len <= 0) { editorSetStatusMessage("Nothing to paste"); return; }
+	editorSaveState();
+	if (pb->is_line_mode) p->cx = 0;           /* whole lines go above this one */
+	editorHandlePaste(pb->data, pb->len);
+}
+
+static void hkTypeKey(editorPane *p, int c) {
+	if (E.mode == MODE_VISUAL) hkMarkSet(p, 0);   /* typing ends the region */
+	editorSaveState();
+	if (c == '\r') editorInsertNewLine();
+	else if (c == BACKSPACE || c == CTRL_KEY('h')) editorDelChar();
+	else if (c == DEL_KEY || c == CTRL_KEY('d')) {
+		if (p->cy < p->numrows && (p->cx < p->row[p->cy].size || p->cy + 1 < p->numrows)) {
+			editorMoveCursor(ARROW_RIGHT);
+			editorDelChar();
+		}
+	}
+	else editorInsertChar(c);
+}
+
+static void hkPage(editorPane *p, int dir) {
+	int step = p->height - hkPaneHdr(p) - 2;
+	if (step < 1) step = 1;
+	p->cy += dir * step;
+	hkClampCursor(p);
+}
+
+/* the first match at or after (y, x) going forward, or before it going back; wraps */
+static int hkSearchFrom(editorPane *p, const char *q, int y, int x, int dir, int *oy, int *ox) {
+	int ql = (int)strlen(q);
+	if (!ql || p->numrows == 0) return 0;
+	for (int k = 0; k <= p->numrows; k++) {
+		int r = ((dir > 0 ? y + k : y - k) % p->numrows + p->numrows) % p->numrows;
+		erow *row = &p->row[r];
+		if (dir > 0) {
+			int from = k == 0 ? x : 0;
+			for (int i = from; i + ql <= row->size; i++)
+				if (!memcmp(row->chars + i, q, ql)) { *oy = r; *ox = i; return 1; }
+		} else {
+			int to = k == 0 ? x : row->size;
+			for (int i = (to < row->size ? to : row->size) - ql; i >= 0; i--)
+				if (!memcmp(row->chars + i, q, ql) && (k > 0 || i <= x)) { *oy = r; *ox = i; return 1; }
+		}
+	}
+	return 0;
+}
+
+static void hkSearchShow(editorPane *p, const char *q) {
+	free(E.search.query);
+	E.search.query = (q && *q) ? strdup(q) : NULL;
+	hkRefreshSyntax(p);
+}
+
+/* emacs C-s / C-r: moves while you type; C-s again finds the next, C-g goes back */
+static void hkIsearch(editorPane *p, int dir) {
+	int oy = p->cy, ox = p->cx;
+	char q[256] = "";
+	int qn = 0, found = 1;
+	for (;;) {
+		hkSearchShow(p, q);
+		editorSetStatusMessage("%sI-search%s: %s", found ? "" : "Failing ", dir < 0 ? " backward" : "", q);
+		editorRefreshScreen();
+		int c = hkReadKeyBlocking();
+		int fy, fx;
+		if (c == CTRL_KEY('s') || c == CTRL_KEY('r')) {
+			dir = c == CTRL_KEY('s') ? 1 : -1;
+			if (!qn && hk_last_search[0]) { snprintf(q, sizeof(q), "%s", hk_last_search); qn = (int)strlen(q); }
+			int sx = dir > 0 ? p->cx + 1 : p->cx - 1, sy = p->cy;
+			if (sx < 0) { sy--; sx = sy >= 0 ? p->row[sy].size : 0; if (sy < 0) sy = p->numrows - 1; }
+			found = hkSearchFrom(p, q, sy, sx, dir, &fy, &fx);
+		} else if (c == BACKSPACE || c == CTRL_KEY('h')) {
+			if (qn) q[--qn] = '\0';
+			p->cy = oy; p->cx = ox;
+			found = !qn || hkSearchFrom(p, q, oy, ox, dir, &fy, &fx);
+		} else if (c == CTRL_KEY('g') || c == '\x1b') {
+			p->cy = oy; p->cx = ox;
+			hkSearchShow(p, NULL);
+			editorSetStatusMessage("Quit");
+			return;
+		} else if (c >= 32 && c < 256 && c != 127) {
+			if (qn < (int)sizeof(q) - 1) { q[qn++] = (char)c; q[qn] = '\0'; }
+			found = hkSearchFrom(p, q, p->cy, dir > 0 ? p->cx : p->cx + qn, dir, &fy, &fx);
+		} else {
+			break;                                  /* enter, or any other key, ends it */
+		}
+		if (found && qn) { p->cy = fy; p->cx = fx; }
+	}
+	if (qn) snprintf(hk_last_search, sizeof(hk_last_search), "%s", q);
+	if (p->cy != oy || p->cx != ox) hkPushJump(ox, oy);
+	hkSearchShow(p, NULL);
+	editorSetStatusMessage("");
+}
+
+static void hkGotoLine(editorPane *p) {
+	char *a = hkPromptWith("Enter line number, column number: %s", NULL, NULL);
+	if (!a) return;
+	int l = atoi(a), col = 1;
+	const char *comma = strchr(a, ',');
+	if (comma) col = atoi(comma + 1);
+	free(a);
+	if (l < 1) l = 1;
+	hkPushJump(p->cx, p->cy);
+	p->cy = l - 1;
+	p->cx = col > 0 ? col - 1 : 0;
+	hkClampCursor(p);
+}
+
+static void hkPosition(editorPane *p) {
+	long total = 0, before = 0;
+	for (int y = 0; y < p->numrows; y++) {
+		if (y < p->cy) before += p->row[y].size + 1;
+		total += p->row[y].size + 1;
+	}
+	before += p->cx;
+	int size = p->cy < p->numrows ? p->row[p->cy].size : 0;
+	editorSetStatusMessage("line %d/%d (%d%%), col %d/%d, char %ld/%ld (%d%%)",
+		p->cy + 1, p->numrows, p->numrows ? (p->cy + 1) * 100 / p->numrows : 0,
+		p->cx + 1, size + 1, before, total, total ? (int)(before * 100 / total) : 0);
+}
+
+static int hkAnyDirty(void) {
+	editorPane **leaves = NULL;
+	int n = 0, dirty = 0;
+	editorCollectLeafPanes(E.root_pane, &leaves, &n);
+	for (int i = 0; i < n; i++) if (leaves[i]->type == PANE_EDITOR && leaves[i]->dirty) dirty = 1;
+	free(leaves);
+	return dirty;
+}
+
+/* one key from a y/n question in the message line */
+static int hkAsk(const char *q) {
+	editorSetStatusMessage("%s", q);
+	editorRefreshScreen();
+	int c = hkReadKeyBlocking();
+	editorSetStatusMessage("");
+	return c;
+}
+
+/* nano ^X, emacs C-x k: close this buffer (saving if asked), the last one quits */
+static void hkCloseBuffer(editorPane *p) {
+	if (p->dirty) {
+		int c = hkAsk("Save modified buffer?  Y Yes  N No  ^C Cancel");
+		if (c == 'y' || c == 'Y') {
+			editorSave(0);
+			if (p->dirty) return;
+		} else if (c != 'n' && c != 'N') {
+			editorSetStatusMessage("Cancelled");
+			return;
+		}
+	}
+	if (hkLeafCount() > 1) {
+		E.force_window_command = 1;
+		editorClosePane();
+		return;
+	}
+	exit(0);
+}
+
+static void hkWriteOut(editorPane *p) {
+	char *name = hkPromptWith("File Name to Write: %s", p->filename ? hkBaseName(p->filename) : "", NULL);
+	if (!name) { editorSetStatusMessage("Cancelled"); return; }
+	if (!p->filename || strcmp(hkBaseName(p->filename), name) != 0) {
+		free(p->filename);
+		p->filename = name;
+		p->file_mtime = 0;
+		editorSelectSyntaxHighlight();
+		editorSave(1);
+		return;
+	}
+	free(name);
+	editorSave(0);
+}
+
+static void hkFindFile(void) {
+	char cwd[PATH_MAX];
+	if (!getcwd(cwd, sizeof(cwd))) cwd[0] = '\0';
+	size_t l = strlen(cwd);
+	if (l + 1 < sizeof(cwd)) { cwd[l] = '/'; cwd[l + 1] = '\0'; }
+	char *path = hkPromptWith("Find file: %s", cwd, NULL);
+	if (!path) return;
+	hkOpenPath(path);
+	free(path);
+}
+
+/* nano ^R: the file's text at the cursor */
+static void hkInsertFile(editorPane *p) {
+	char *path = hkPromptWith("File to insert: %s", NULL, NULL);
+	if (!path) return;
+	FILE *fp = fopen(path, "r");
+	if (!fp) { editorSetStatusMessage("%s: %s", path, strerror(errno)); free(path); return; }
+	char *buf = NULL;
+	size_t n = 0, cap = 0, got;
+	char chunk[4096];
+	while ((got = fread(chunk, 1, sizeof(chunk), fp)) > 0) {
+		if (n + got + 1 > cap) { cap = (n + got + 1) * 2; char *nb = realloc(buf, cap); if (!nb) break; buf = nb; }
+		memcpy(buf + n, chunk, got);
+		n += got;
+	}
+	fclose(fp);
+	if (buf) { editorHandlePaste(buf, (int)n); free(buf); }
+	editorSetStatusMessage("Read %zu bytes from %s", n, path);
+	free(path);
+	(void)p;
+}
+
+/* nano ^\: each match from the cursor on, asked about one at a time */
+static void hkReplace(editorPane *p) {
+	char *needle = hkPromptWith("Search (to replace): %s", hk_last_search[0] ? hk_last_search : NULL, NULL);
+	if (!needle) return;
+	char *with = hkPromptWith("Replace with: %s", NULL, NULL);
+	if (!with) with = strdup("");
+	snprintf(hk_last_search, sizeof(hk_last_search), "%s", needle);
+	int nl = (int)strlen(needle), wl = (int)strlen(with), count = 0, all = 0;
+	int y = p->cy, x = p->cx;
+	editorSaveState();
+	while (y < p->numrows) {
+		erow *row = &p->row[y];
+		char *hit = NULL;
+		for (int i = x; i + nl <= row->size; i++) if (!memcmp(row->chars + i, needle, nl)) { hit = row->chars + i; break; }
+		if (!hit) { y++; x = 0; continue; }
+		int at = (int)(hit - row->chars);
+		p->cy = y; p->cx = at;
+		int c = 'y';
+		if (!all) {
+			hkSearchShow(p, needle);
+			c = hkAsk("Replace this instance?  Y Yes  N No  A All  ^C Cancel");
+		}
+		if (c == 'a' || c == 'A') { all = 1; c = 'y'; }
+		if (c == 'y' || c == 'Y') {
+			char *nb = malloc(row->size - nl + wl + 1);
+			if (!nb) break;
+			memcpy(nb, row->chars, at);
+			memcpy(nb + at, with, wl);
+			memcpy(nb + at + wl, row->chars + at + nl, row->size - at - nl + 1);
+			free(row->chars);
+			row->chars = nb;
+			row->size += wl - nl;
+			editorUpdateRow(row);
+			p->dirty++;
+			count++;
+			x = at + wl;
+		} else if (c == 'n' || c == 'N') {
+			x = at + 1;
+		} else {
+			break;
+		}
+	}
+	hkSearchShow(p, NULL);
+	editorSetStatusMessage("Replaced %d occurrence%s", count, count == 1 ? "" : "s");
+	free(needle);
+	free(with);
+}
+
+static void hkFocusLeafPick(int sel) { editorFocusEditorN(sel + 1); }
+
+/* emacs C-x b: the open buffers, one per editor window */
+static void hkBufferList(void) {
+	editorPane **leaves = NULL;
+	int n = 0;
+	editorCollectLeafPanes(E.root_pane, &leaves, &n);
+	char **items = calloc(n ? n : 1, sizeof(char *));
+	for (int i = 0; i < n; i++) {
+		char line[300];
+		const char *base = hkBaseName(leaves[i]->filename);
+		snprintf(line, sizeof(line), "%d  %s%s", i + 1, *base ? base : "[No Name]", leaves[i]->dirty ? " [+]" : "");
+		items[i] = strdup(line);
+	}
+	editorPopupOpen("Buffers", (const char *const *)items, n, 1, 0);
+	E.popup_apply = hkFocusLeafPick;
+	for (int i = 0; i < n; i++) if (leaves[i] == E.active_pane) E.popup_sel = i;
+	for (int i = 0; i < n; i++) free(items[i]);
+	free(items);
+	free(leaves);
+}
+
+/* C-x 1: keep this window, close the others that have nothing unsaved */
+static void hkOnlyWindow(editorPane *keep) {
+	if (E.left_panel) editorToggleExplorer();
+	if (E.right_panel) editorToggleAI();
+	if (E.bottom_panel) hkCloseSidePanel(&E.bottom_panel, NULL);
+	int kept = 0;
+	for (int guard = 0; guard < MAX_PANES; guard++) {
+		editorPane **leaves = NULL;
+		int n = 0;
+		editorCollectLeafPanes(E.root_pane, &leaves, &n);
+		editorPane *victim = NULL;
+		for (int i = 0; i < n; i++) if (leaves[i] != keep && !leaves[i]->dirty) { victim = leaves[i]; break; }
+		for (int i = 0; i < n; i++) if (leaves[i] != keep && leaves[i]->dirty) kept++;
+		free(leaves);
+		if (!victim) break;
+		kept = 0;
+		E.active_pane = victim;
+		editorClosePane();
+	}
+	E.active_pane = keep;
+	keep->is_focused = 1;
+	if (kept) editorSetStatusMessage("%d window%s with unsaved changes left open", kept, kept == 1 ? "" : "s");
+}
+
+/* C-x then a key; nano's and emacs's ways to the : commands. Any pane. */
+static int hkModelessGlobal(int c) {
+	static int cx = 0;
+	editorPane *p = E.active_pane;
+	if (E.keymode == HK_KEYS_NANO) {
+		if (c == CTRL_KEY('t')) { editorColonCommand(); return 1; }
+		return 0;
+	}
+	if (!cx) {
+		if (c != CTRL_KEY('x')) return 0;
+		cx = 1;
+		editorSetStatusMessage("C-x-");
+		return 1;
+	}
+	cx = 0;
+	editorSetStatusMessage("");
+	int ed = p && p->type == PANE_EDITOR;
+	switch (c) {
+	case CTRL_KEY('s'): if (ed) editorSave(0); break;
+	case CTRL_KEY('w'): if (ed) hkWriteOut(p); break;
+	case CTRL_KEY('f'): hkFindFile(); break;
+	case CTRL_KEY('c'):
+		if (!hkAnyDirty() || (hkAsk("Modified buffers exist; exit anyway? (y or n)") | 32) == 'y') exit(0);
+		break;
+	case 'b': hkBufferList(); break;
+	case 'k': if (ed) hkCloseBuffer(p); else if (p) editorClosePane(); break;
+	case 'o': editorNextPane(); break;
+	case '0': editorClosePane(); break;
+	case '1': if (ed) hkOnlyWindow(p); break;
+	case '2': editorSplitPane(0); break;
+	case '3': editorSplitPane(1); break;
+	case 'u': if (ed) editorUndo(); break;
+	case 'h':
+		if (ed && p->numrows) {
+			p->cy = p->numrows - 1;
+			p->cx = p->row[p->cy].size;
+			p->visual_anchor_x = p->visual_anchor_y = 0;
+			E.mode = MODE_VISUAL;
+		}
+		break;
+	case CTRL_KEY('g'): editorSetStatusMessage("Quit"); break;
+	default: editorSetStatusMessage("C-x %s%c is undefined", c < 32 ? "C-" : "", c < 32 ? c + 96 : (c < 127 ? c : '?'));
+	}
+	return 1;
+}
+
+static void hkEmacsKey(editorPane *p, int c) {
+	static int meta = 0;
+	int was_kill = hk_last_kill;
+	hk_last_kill = 0;
+	if (meta) {
+		meta = 0;
+		switch (c) {
+		case 'x': case 'X': editorColonCommand(); break;
+		case 'f': hkWordForward(p); break;
+		case 'b': hkWordBack(p); break;
+		case '<': hkPushJump(p->cx, p->cy); p->cy = 0; p->cx = 0; break;
+		case '>': hkPushJump(p->cx, p->cy); p->cy = p->numrows ? p->numrows - 1 : 0; p->cx = p->numrows ? p->row[p->cy].size : 0; break;
+		case 'v': hkPage(p, -1); break;
+		case 'w': hkCutRegion(p, 1); break;
+		case 'd': editorSaveState(); hkDeleteWordForward(p); break;
+		case '%': hkReplace(p); break;
+		case 'g': hkGotoLine(p); break;
+		default: break;
+		}
+		return;
+	}
+	switch (c) {
+	case '\x1b': meta = 1; return;
+	case CTRL_KEY('g'):
+		if (E.mode == MODE_VISUAL) hkMarkSet(p, 0);
+		editorSetStatusMessage("Quit");
+		break;
+	case CTRL_KEY('f'): case ARROW_RIGHT: editorMoveCursor(ARROW_RIGHT); break;
+	case CTRL_KEY('b'): case ARROW_LEFT:  editorMoveCursor(ARROW_LEFT); break;
+	case CTRL_KEY('n'): case ARROW_DOWN:  editorMoveCursor(ARROW_DOWN); break;
+	case CTRL_KEY('p'): case ARROW_UP:    editorMoveCursor(ARROW_UP); break;
+	case CTRL_KEY('a'): case HOME_KEY: p->cx = 0; break;
+	case CTRL_KEY('e'): case END_KEY: if (p->cy < p->numrows) p->cx = p->row[p->cy].size; break;
+	case CTRL_KEY('v'): case PAGE_DOWN: hkPage(p, 1); break;
+	case PAGE_UP: hkPage(p, -1); break;
+	case CTRL_KEY('l'): break;
+	case CTRL_SPACE_KEY: hkMarkSet(p, 1); break;
+	case CTRL_KEY('w'): hkCutRegion(p, 0); break;
+	case CTRL_KEY('y'): hkYank(p); break;
+	case CTRL_KEY('s'): hkIsearch(p, 1); break;
+	case CTRL_KEY('r'): hkIsearch(p, -1); break;
+	case 0x1f: editorUndo(); break;                     /* C-/ and C-_ */
+	case CTRL_KEY('k'):
+		if (p->cy >= p->numrows) break;
+		editorSaveState();
+		if (p->cx < p->row[p->cy].size) {
+			int len = p->row[p->cy].size - p->cx;
+			hkKill(p->row[p->cy].chars + p->cx, len, 0, was_kill);
+			hkDeleteRange(p, p->cy, p->cx, p->cy, p->row[p->cy].size);
+		} else if (p->cy + 1 < p->numrows) {
+			hkKill("\n", 1, 0, was_kill);
+			hkDeleteRange(p, p->cy, p->cx, p->cy + 1, 0);
+		}
+		hk_last_kill = 1;
+		break;
+	case CTRL_KEY('o'):
+		editorSaveState();
+		editorInsertNewLine();
+		editorMoveCursor(ARROW_LEFT);
+		break;
+	case '\t': case '\r': case BACKSPACE: case CTRL_KEY('h'): case CTRL_KEY('d'): case DEL_KEY:
+		hkTypeKey(p, c);
+		break;
+	default:
+		if (c >= 32 && c < 256 && c != 127) hkTypeKey(p, c);
+		break;
+	}
+}
+
+static void hkNanoKey(editorPane *p, int c) {
+	static int meta = 0;
+	int was_cut = hk_last_kill;
+	hk_last_kill = 0;
+	if (meta) {
+		meta = 0;
+		switch (c) {
+		case 'u': case 'U': editorUndo(); break;
+		case 'e': case 'E': editorRedo(); break;
+		case 'a': case 'A': hkMarkSet(p, E.mode != MODE_VISUAL); break;
+		case '6': case '^': hkCutRegion(p, 1); break;
+		case 'w': case 'W':
+			if (hk_last_search[0]) {
+				int fy, fx;
+				if (hkSearchFrom(p, hk_last_search, p->cy, p->cx + 1, 1, &fy, &fx)) { p->cy = fy; p->cx = fx; }
+				else editorSetStatusMessage("\"%s\" not found", hk_last_search);
+			}
+			break;
+		case '>': case '.': editorNextPane(); break;
+		case '<': case ',': editorCyclePane(-1); break;
+		case '\\': p->cy = 0; p->cx = 0; break;
+		case '/': p->cy = p->numrows ? p->numrows - 1 : 0; break;
+		case 'g': case 'G': hkGotoLine(p); break;
+		case 'r': case 'R': hkReplace(p); break;
+		default: break;
+		}
+		return;
+	}
+	switch (c) {
+	case '\x1b': meta = 1; return;
+	case CTRL_KEY('o'): hkWriteOut(p); break;
+	case CTRL_KEY('s'): editorSave(0); break;
+	case CTRL_KEY('x'): hkCloseBuffer(p); break;
+	case CTRL_KEY('g'): editorPopupOpenHelp(); break;
+	case CTRL_KEY('c'): hkPosition(p); break;
+	case 0x1f: hkGotoLine(p); break;                       /* ^_ */
+	case CTRL_KEY('r'): hkInsertFile(p); break;
+	case 0x1c: hkReplace(p); break;                        /* ^\ */
+	case 0x1e: hkMarkSet(p, E.mode != MODE_VISUAL); break; /* ^^ */
+	case CTRL_KEY('w'): {
+		char *q = hkPromptWith("Search: %s", NULL, NULL);
+		if (!q) break;
+		snprintf(hk_last_search, sizeof(hk_last_search), "%s", q);
+		int fy, fx;
+		if (hkSearchFrom(p, q, p->cy, p->cx + 1, 1, &fy, &fx)) { hkPushJump(p->cx, p->cy); p->cy = fy; p->cx = fx; }
+		else editorSetStatusMessage("\"%s\" not found", q);
+		free(q);
+		break;
+	}
+	case CTRL_KEY('k'):
+		if (E.mode == MODE_VISUAL) { hkCutRegion(p, 0); break; }
+		if (p->cy >= p->numrows) break;
+		editorSaveState();
+		{
+			erow *r = &p->row[p->cy];
+			char *line = malloc(r->size + 2);
+			if (!line) break;
+			memcpy(line, r->chars, r->size);
+			line[r->size] = '\n';
+			hkKill(line, r->size + 1, 1, was_cut);
+			free(line);
+			if (p->numrows > 1) editorDelRow(p->cy);
+			else { r->size = 0; r->chars[0] = '\0'; editorUpdateRow(r); p->dirty++; }
+			hkClampCursor(p);
+			p->cx = 0;
+		}
+		hk_last_kill = 1;
+		break;
+	case CTRL_KEY('u'): hkYank(p); break;
+	case CTRL_KEY('a'): case HOME_KEY: p->cx = 0; break;
+	case CTRL_KEY('e'): case END_KEY: if (p->cy < p->numrows) p->cx = p->row[p->cy].size; break;
+	case CTRL_KEY('y'): case PAGE_UP: hkPage(p, -1); break;
+	case CTRL_KEY('v'): case PAGE_DOWN: hkPage(p, 1); break;
+	case CTRL_KEY('f'): case ARROW_RIGHT: editorMoveCursor(ARROW_RIGHT); break;
+	case CTRL_KEY('b'): case ARROW_LEFT:  editorMoveCursor(ARROW_LEFT); break;
+	case CTRL_KEY('n'): case ARROW_DOWN:  editorMoveCursor(ARROW_DOWN); break;
+	case CTRL_KEY('p'): case ARROW_UP:    editorMoveCursor(ARROW_UP); break;
+	case CTRL_KEY('l'): break;
+	case '\t': case '\r': case BACKSPACE: case CTRL_KEY('h'): case CTRL_KEY('d'): case DEL_KEY:
+		hkTypeKey(p, c);
+		break;
+	default:
+		if (c >= 32 && c < 256 && c != 127) hkTypeKey(p, c);
+		break;
+	}
+}
+
+/* nano's two rows of shortcuts */
+static void hkDrawNanoBar(int gy) {
+	static const char *const rows[2][6][2] = {
+		{{"^G", "Help"}, {"^O", "Write Out"}, {"^W", "Where Is"}, {"^K", "Cut"}, {"^T", "Command"}, {"^C", "Location"}},
+		{{"^X", "Exit"}, {"^R", "Read File"}, {"^\\", "Replace"}, {"^U", "Paste"}, {"^_", "Go To Line"}, {"M-U", "Undo"}},
+	};
+	int w = E.screencols / 6;
+	if (w < 6) w = 6;
+	Color key_fg = E.theme.status_fg, key_bg = E.theme.status_bg;
+	for (int r = 0; r < 2; r++) {
+		int y = gy + r;
+		for (int x = 0; x < E.screencols; x++) gridPutCh(x, y, ' ', E.theme.fg, E.theme.bg);
+		for (int k = 0; k < 6 && k * w < E.screencols; k++) {
+			int x = k * w;
+			int kw = gridPutStr(x, y, rows[r][k][0], E.screencols - x, key_fg, key_bg);
+			if (x + kw + 1 < E.screencols)
+				gridPutStr(x + kw + 1, y, rows[r][k][1], MIN(w - kw - 2, E.screencols - x - kw - 1), E.theme.fg, E.theme.bg);   /* one cell always free before the next key */
+		}
+	}
+}
+
 void editorProcessKeyPress() {
 	static int last_char = 0;
 	static int g_pressed = 0;
@@ -5293,16 +6912,8 @@ void editorProcessKeyPress() {
 	static int last_action = 0;
 
 	int c = editorReadKey();
-	
-	if (E.splash_active) {
-		if (c == MOUSE_WHEEL_UP || c == MOUSE_WHEEL_DOWN || c == MOUSE_MOTION || c == 0) {
-			return;
-		}
 
-		E.splash_active = 0;
-		editorSetStatusMessage(":h = help | :w = write | :q = quit | / = find | ^W = window | :rei/:ai = agent");
-		return;
-	}
+	if (E.intro_active && c != 0 && c != MOUSE_MOTION && c != CTRL_KEY('l')) E.intro_active = 0;
 
 	if (E.popup_active) {
 		editorPopupHandleKey(c);
@@ -5320,7 +6931,7 @@ void editorProcessKeyPress() {
 
 	if (c == MOUSE_CLICK) {
 		editorProcessMouse(E.mouse_x, E.mouse_y);
-		if (E.mode == MODE_INSERT) editorSetMode(MODE_INSERT);
+		if (E.mode == MODE_INSERT && E.keymode == HK_KEYS_VIM) editorSetMode(MODE_INSERT);
 		return;
 	}
 
@@ -5401,7 +7012,10 @@ void editorProcessKeyPress() {
 		return;
 	}
 
-	if (c == CTRL_KEY('w')) {
+	if (E.keymode != HK_KEYS_VIM && hkModelessGlobal(c)) return;
+
+	/* ctrl-w is vim's window chord; emacs and nano editors use the key themselves */
+	if (c == CTRL_KEY('w') && (E.keymode == HK_KEYS_VIM || !E.active_pane || E.active_pane->type != PANE_EDITOR)) {
 		E.in_window_command = 1;
 		editorSetStatusMessage("Window command (s/v/w/c/! · 1-9 editor · r Rei · k Kami)");
 		return;
@@ -5425,6 +7039,9 @@ void editorProcessKeyPress() {
 	}
 
 	if (!pane || pane->type != PANE_EDITOR) return;
+
+	if (E.keymode == HK_KEYS_NANO) { hkNanoKey(pane, c); return; }
+	if (E.keymode == HK_KEYS_EMACS) { hkEmacsKey(pane, c); return; }
 
 	if (E.mode == MODE_NORMAL) {
 		if (getenv("HAKE_TRACE")) {
@@ -5646,7 +7263,6 @@ void editorProcessKeyPress() {
 			hkRecordStart('a', hkConsumeCount());
 			editorSetMode(MODE_INSERT);
 			editorSaveState();
-			editorSetStatusMessage("INSERT via 'a' (waiting_reg was %d)", E.hk.waiting_reg);
 			break;
 
 		case 'A':
@@ -6291,12 +7907,7 @@ void editorProcessKeyPress() {
 
 /*** scrollable popup overlay ***/
 
-static const char *const HK_THEME_NAMES[] = {
-	"mithraeum", "washi", "dark", "light", "gruvbox", "nord", "dracula", "monokai",
-	"solarized", "tokyonight", "catppuccin", "onedark", "material",
-	"everforest", "rosepine", "github-dark", "github-light", "ayu", "kanagawa"
-};
-#define HK_THEME_COUNT ((int)(sizeof(HK_THEME_NAMES)/sizeof(HK_THEME_NAMES[0])))
+static int hkThemeNames(const char **out, int max);
 
 void editorPopupFree(void) {
 	if (E.popup_lines) {
@@ -6322,15 +7933,17 @@ void editorPopupOpen(const char *title, const char *const *items, int count,
 	E.popup_sel = 0;
 	E.popup_selectable = selectable;
 	E.popup_preview = preview;
+	E.popup_apply = NULL;
 	E.popup_choice_id = 0;
 	snprintf(E.popup_title, sizeof(E.popup_title), "%s", title ? title : "");
 	snprintf(E.popup_saved_theme, sizeof(E.popup_saved_theme), "%s", E.theme_name);
 	E.popup_active = 1;
-	E.full_redraw_pending = 1;
 }
 
 void editorPopupOpenHelp(void) {
-	char *txt = strdup(HAKE_HELP_TEXT);
+	const char *mode = E.keymode == HK_KEYS_EMACS ? HK_EMACS_HELP : E.keymode == HK_KEYS_NANO ? HK_NANO_HELP : "";
+	char *txt = malloc(strlen(mode) + strlen(HAKE_HELP_TEXT) + 1);
+	if (txt) { strcpy(txt, mode); strcat(txt, HAKE_HELP_TEXT); }
 	if (!txt) return;
 	int cap = 64, n = 0;
 	char **lines = malloc(cap * sizeof(char *));
@@ -6349,15 +7962,17 @@ void editorPopupOpenHelp(void) {
 		if (!nl) break;
 		p = nl + 1;
 	}
-	editorPopupOpen("Help — commands & keys", (const char *const *)lines, n, 0, 0);
+	editorPopupOpen("Help: commands & keys", (const char *const *)lines, n, 0, 0);
 	free(lines);
 	free(txt);
 }
 
 void editorPopupOpenThemes(void) {
-	editorPopupOpen("Theme", HK_THEME_NAMES, HK_THEME_COUNT, 1, 1);
-	for (int i = 0; i < HK_THEME_COUNT; i++) {
-		if (strcmp(HK_THEME_NAMES[i], E.theme_name) == 0) { E.popup_sel = i; break; }
+	const char *names[96];
+	int n = hkThemeNames(names, 96);
+	editorPopupOpen("Theme", names, n, 1, 1);
+	for (int i = 0; i < n; i++) {
+		if (strcmp(names[i], E.theme_name) == 0) { E.popup_sel = i; break; }
 	}
 }
 
@@ -6377,8 +7992,7 @@ void editorPopupClose(int apply) {
 		E.popup_choice_id = 0;
 		E.popup_active = 0;
 		editorPopupFree();
-		E.full_redraw_pending = 1;
-		return;
+			return;
 	}
 	if (E.popup_preview && !apply) {
 		if (E.popup_saved_theme[0] &&
@@ -6387,13 +8001,18 @@ void editorPopupClose(int apply) {
 		}
 	} else if (apply && E.popup_selectable && E.popup_count > 0) {
 		const char *sel = E.popup_lines[E.popup_sel];
-		if (E.popup_preview) {
-			editorSetStatusMessage("theme: %s", sel);
+		if (E.popup_preview) hkSaveTheme(sel);
+		else if (E.popup_apply) {
+			void (*fn)(int) = E.popup_apply;
+			int pick = E.popup_sel;
+			E.popup_active = 0;
+			editorPopupFree();
+			fn(pick);
+			return;
 		}
 	}
 	E.popup_active = 0;
 	editorPopupFree();
-	E.full_redraw_pending = 1;
 }
 
 static int hkPopupBodyRows(void) {
@@ -6458,8 +8077,7 @@ void editorPopupHandleKey(int c) {
 				hkPopupClampScroll();
 				if (E.popup_preview && strcmp(E.popup_lines[E.popup_sel], E.theme_name) != 0)
 					editorApplyThemeByName(E.popup_lines[E.popup_sel]);
-				E.full_redraw_pending = 1;
-			}
+						}
 		}
 		return;
 	}
@@ -6513,7 +8131,6 @@ void editorPopupHandleKey(int c) {
 		if (strcmp(E.popup_lines[E.popup_sel], E.theme_name) != 0)
 			editorApplyThemeByName(E.popup_lines[E.popup_sel]);
 	}
-	E.full_redraw_pending = 1;
 }
 
 void editorDrawPopup() {
@@ -6572,133 +8189,6 @@ void editorDrawPopup() {
 		         (E.popup_selectable ? E.popup_sel : E.popup_scroll) + 1, E.popup_count);
 		gridPutStr(x0 + 2, y0 + boxh - 1, pos, (int)strlen(pos), dim, bg);
 	}
-}
-
-/*** splash screen ***/
-static void splashPut(struct abuf *ab, int row, int col, const char *s, Color fg) {
-	char buf[32];
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", row, col + 1);
-	abAppend(ab, buf, strlen(buf));
-	setThemeBgColor(ab, E.theme.bg);
-	setThemeColor(ab, fg);
-	abAppend(ab, s, strlen(s));
-}
-
-static void splashPutCentered(struct abuf *ab, int row, const char *s, Color fg) {
-	int col = (E.screencols - (int)strlen(s)) / 2;
-	if (col < 0) col = 0;
-	splashPut(ab, row, col, s, fg);
-}
-
-static void splashBullet(struct abuf *ab, int row, const char *text, Color bullet, Color body) {
-	char line[160];
-	snprintf(line, sizeof(line), "\xc2\xb7 %s", text);
-	int col = (E.screencols - (int)strlen(line)) / 2;
-	if (col < 0) col = 0;
-	splashPut(ab, row, col, "\xc2\xb7", bullet);
-	setThemeColor(ab, body);
-	abAppend(ab, line + 2, strlen(line) - 2);
-}
-
-void editorDrawSplash() {
-	struct abuf ab = ABUF_INIT;
-
-	abAppend(&ab, "\x1b[?25l", 6);
-	abAppend(&ab, "\x1b[2J", 4);
-	abAppend(&ab, "\x1b[H", 3);
-
-	setThemeBgColor(&ab, E.theme.bg);
-
-	for (int y = 0; y <= E.screenrows + 2; y++) {
-		char buf[32];
-		snprintf(buf, sizeof(buf), "\x1b[%d;1H", y + 1);
-		abAppend(&ab, buf, strlen(buf));
-		setThemeBgColor(&ab, E.theme.bg);
-		for (int x = 0; x < E.screencols; x++) {
-			abAppend(&ab, " ", 1);
-		}
-	}
-
-	int center_y = (E.screenrows + 2) / 2 - 6;
-	if (center_y < 1) center_y = 1;
-
-	static const char *logo[] = {
-		"██╗  ██╗ █████╗ ██╗  ██╗ ██████╗",
-		"██║  ██║██╔══██╗██║ ██╔╝██╔═══██╗",
-		"███████║███████║█████╔╝ ██║   ██║",
-		"██╔══██║██╔══██║██╔═██╗ ██║   ██║",
-		"██║  ██║██║  ██║██║  ██╗╚██████╔╝",
-		"╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝"
-	};
-	int logo_x = E.screencols / 2 - 17;
-	if (logo_x < 0) logo_x = 0;
-	for (int i = 0; i < 6; i++) {
-		splashPut(&ab, center_y + i, logo_x, logo[i], E.theme.border);
-	}
-
-	splashPut(&ab, center_y + 7, (E.screencols - 3) / 2, "箱", E.theme.border);
-	splashPutCentered(&ab, center_y + 8, "EDIT", E.theme.border);
-
-	char version[80];
-	snprintf(version, sizeof(version), "HAKE v%s", HAKE_VERSION);
-	splashPutCentered(&ab, center_y + 9, version, (Color){130, 130, 130});
-	splashPutCentered(&ab, center_y + 10, "minimal text editor", (Color){100, 100, 100});
-
-	if (E.screenrows >= center_y + 20) {
-		static const char *HK_NEW[] = {
-			"Rei is hako: its pickers, approvals and :commands",
-			"19 themes, code in each theme's own colours",
-			"saving can no longer overwrite Rei's edit",
-			NULL
-		};
-		static const char *HK_TIPS[] = {
-			":help opens the full command list",
-			":q rei|kami closes a side pane from any focused pane",
-			":theme <name> swaps theme at runtime (try washi)",
-			"/trust grants the AI panel file-op access",
-			"Ctrl-W cycles focus between editor / explorer / AI",
-			"gg/G + Ctrl-D/U scroll AI history in visual mode",
-			NULL
-		};
-
-		Color label_color = E.theme.fg;
-		Color body_color = E.theme.comment;
-
-		splashPutCentered(&ab, center_y + 12, "# NEW", label_color);
-		for (int i = 0; i < 2 && HK_NEW[i]; i++) {
-			splashBullet(&ab, center_y + 13 + i, HK_NEW[i], E.theme.border, body_color);
-		}
-
-		int total = 0;
-		while (HK_TIPS[total]) total++;
-		time_t now = time(NULL);
-		struct tm *tm = localtime(&now);
-		int seed = tm ? tm->tm_yday : 0;
-
-		splashPutCentered(&ab, center_y + 16, "# TIPS", label_color);
-		for (int i = 0; i < 2; i++) {
-			splashBullet(&ab, center_y + 17 + i, HK_TIPS[total ? (seed + i) % total : 0],
-				E.theme.border, body_color);
-		}
-	}
-
-	const char *instruction = "Press any key to start";
-	int instr_col = (E.screencols - (int)strlen(instruction)) / 2;
-	char buf[32];
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.screenrows, instr_col + 1);
-	abAppend(&ab, buf, strlen(buf));
-	setThemeBgColor(&ab, E.theme.bg);
-	setThemeColor(&ab, (Color){80, 80, 80});
-	abAppend(&ab, "\x1b[5m", 4);
-	abAppend(&ab, instruction, strlen(instruction));
-	abAppend(&ab, "\x1b[25m", 5);
-	abAppend(&ab, "\x1b[0m", 4);
-
-	snprintf(buf, sizeof(buf), "\x1b[%d;1H", E.screenrows + 2);
-	abAppend(&ab, buf, strlen(buf));
-
-	if (write(STDOUT_FILENO, ab.b, ab.len) < 0) {}
-	abFree(&ab);
 }
 
 /*** explorer ***/
@@ -6805,7 +8295,7 @@ void explorerRender(editorPane *pane, struct abuf *ab) {
 			Color hf = E.theme.status_fg;
 			Color hb = E.theme.status_bg;
 			char header[64];
-			snprintf(header, sizeof(header), " %s %s ", E.explorer_kanji, E.explorer_name);
+			snprintf(header, sizeof(header), " %s ", E.explorer_name);
 			int used = gridPutStr(gx, gy, header, pane->width, hf, hb);
 			for (int x = used; x < pane->width; x++) {
 				gridPutCh(gx + x, gy, ' ', hf, hb);
@@ -7045,8 +8535,6 @@ void editorToggleExplorer() {
 	explorerInit(E.left_panel);
 
 	editorResizePanes();
-	
-	editorSetStatusMessage("Explorer opened");
 }
 
 /*** runner ***/
@@ -7149,7 +8637,7 @@ static void runnerStop(runnerData *r) {
 	int running = r->running;
 	pid_t pid = r->pid;
 	pthread_mutex_unlock(&r->lock);
-	if (running && pid > 0) kill(pid, SIGTERM);
+	if (running && pid > 0 && kill(-pid, SIGTERM) != 0) kill(pid, SIGTERM);   /* its group: a pipeline dies whole */
 	if (r->thread_valid) {
 		pthread_join(r->thread, NULL);
 		r->thread_valid = 0;
@@ -7170,36 +8658,114 @@ static void runnerCleanup(editorPane *pane) {
 	runnerStop(r);
 	for (int i = 0; i < r->count; i++) free(r->lines[i]);
 	free(r->lines);
+	for (int i = 0; i < r->hist_n; i++) free(r->hist[i]);
+	free(r->hist);
 	pthread_mutex_destroy(&r->lock);
 	free(r);
 	pane->runner = NULL;
 }
 
-static void runnerStart(const char *cmd) {
-#ifdef _WIN32
-	(void)cmd;
-	editorSetStatusMessage(":run is not wired on Windows yet — use :!<cmd>");
-#else
+static runnerData *runnerEnsurePane(void) {
 	if (!E.bottom_panel) {
 		E.bottom_panel = editorCreatePane(PANE_RUNNER, 0, 0, E.screencols, 10);
-		if (!E.bottom_panel) return;
+		if (!E.bottom_panel) return NULL;
 		E.bottom_panel->runner = calloc(1, sizeof(runnerData));
 		if (!E.bottom_panel->runner) {
 			editorFreePane(E.bottom_panel);
 			E.bottom_panel = NULL;
-			return;
+			return NULL;
 		}
 		pthread_mutex_init(&E.bottom_panel->runner->lock, NULL);
+		if (!getcwd(E.bottom_panel->runner->cwd, sizeof(E.bottom_panel->runner->cwd)))
+			snprintf(E.bottom_panel->runner->cwd, sizeof(E.bottom_panel->runner->cwd), ".");
 		editorResizePanes();
 	}
-	runnerData *r = E.bottom_panel->runner;
+	return E.bottom_panel->runner;
+}
+
+#ifndef _WIN32
+static char *hkFindOnPath(const char *name) {
+	const char *path = getenv("PATH");
+	char cand[PATH_MAX];
+	while (path && *path) {
+		const char *colon = strchr(path, ':');
+		int seg = colon ? (int)(colon - path) : (int)strlen(path);
+		if (seg > 0 && snprintf(cand, sizeof(cand), "%.*s/%s", seg, path, name) < (int)sizeof(cand) &&
+		    access(cand, X_OK) == 0) return strdup(cand);
+		if (!colon) break;
+		path = colon + 1;
+	}
+	return NULL;
+}
+#endif
+
+#ifndef _WIN32
+/* console_sandbox=1: writes only to the project and $TMPDIR, no network. macOS
+   has sandbox-exec, Linux bwrap; anywhere else the command does not run. */
+static int hkSandboxArgv(const char *cmd, const char *cwd, char **argv, char *profile, size_t psz, char *errbuf, size_t esz) {
+	static char proj[PATH_MAX], tmp[PATH_MAX], bin[PATH_MAX];
+	const char *t = getenv("TMPDIR");
+	if (!realpath(E.project_dir ? E.project_dir : ".", proj) || !realpath(t && *t ? t : "/tmp", tmp)) {
+		snprintf(errbuf, esz, "console_sandbox=1: cannot resolve the project or TMPDIR");
+		return 0;
+	}
+	size_t tl = strlen(tmp);
+	if (tl > 1 && tmp[tl - 1] == '/') tmp[tl - 1] = '\0';
+	if (strpbrk(proj, "\"\\") || strpbrk(tmp, "\"\\")) {    /* a quote in a path would rewrite the profile */
+		snprintf(errbuf, esz, "console_sandbox=1: the project path has a quote or backslash, so it does not run");
+		return 0;
+	}
+	if (access("/usr/bin/sandbox-exec", X_OK) == 0) {
+		snprintf(profile, psz, "(version 1)(allow default)(deny network*)(deny file-write*)"
+			"(allow file-write* (subpath \"%s\") (subpath \"%s\") (subpath \"/dev\"))", proj, tmp);
+		int i = 0;
+		argv[i++] = "/usr/bin/sandbox-exec"; argv[i++] = "-p"; argv[i++] = profile;
+		argv[i++] = "/bin/sh"; argv[i++] = "-c"; argv[i++] = (char *)cmd; argv[i] = NULL;
+		return 1;
+	}
+	char *bw = hkFindOnPath("bwrap");
+	if (bw) {
+		snprintf(bin, sizeof(bin), "%s", bw);
+		free(bw);
+		int i = 0;
+		argv[i++] = bin; argv[i++] = "--ro-bind"; argv[i++] = "/"; argv[i++] = "/";
+		argv[i++] = "--bind"; argv[i++] = proj; argv[i++] = proj;
+		argv[i++] = "--bind"; argv[i++] = tmp; argv[i++] = tmp;
+		argv[i++] = "--dev"; argv[i++] = "/dev"; argv[i++] = "--proc"; argv[i++] = "/proc";
+		argv[i++] = "--unshare-net"; argv[i++] = "--die-with-parent"; argv[i++] = "--new-session";
+		argv[i++] = "--chdir"; argv[i++] = (char *)cwd;
+		argv[i++] = "/bin/sh"; argv[i++] = "-c"; argv[i++] = (char *)cmd; argv[i] = NULL;
+		return 1;
+	}
+	snprintf(errbuf, esz, "console_sandbox=1: no sandbox-exec or bwrap here, so it does not run unsandboxed");
+	return 0;
+}
+
+#endif
+
+/* keep: the console adds to what is there; the runner starts clean */
+static void runnerSpawn(const char *cmd, int keep, int sandbox) {
+#ifdef _WIN32
+	(void)cmd; (void)keep; (void)sandbox;
+	editorSetStatusMessage(":run and :console are not wired on Windows yet; use :!<cmd>");
+#else
+	runnerData *r = runnerEnsurePane();
+	if (!r) return;
 	runnerStop(r);
 
+	char *argv[24], profile[PATH_MAX * 2 + 256], err[160];
+	if (sandbox && !hkSandboxArgv(cmd, r->cwd, argv, profile, sizeof(profile), err, sizeof(err))) {
+		runnerAppend(r, err);
+		editorSetStatusMessage("%s", err);
+		return;
+	}
 	pthread_mutex_lock(&r->lock);
-	for (int i = 0; i < r->count; i++) free(r->lines[i]);
-	r->count = 0;
-	r->selected = 0;
-	r->scroll_offset = 0;
+	if (!keep) {
+		for (int i = 0; i < r->count; i++) free(r->lines[i]);
+		r->count = 0;
+		r->selected = 0;
+		r->scroll_offset = 0;
+	}
 	r->truncated = 0;
 	r->exit_code = -1;
 	snprintf(r->cmd, sizeof(r->cmd), "%s", cmd);
@@ -7218,13 +8784,21 @@ static void runnerStart(const char *cmd) {
 		return;
 	}
 	if (pid == 0) {
+		/* sandboxed: a new session, so it cannot open the terminal and push
+		   keystrokes into the editor (TIOCSTI) */
+		if (sandbox) setsid(); else setpgid(0, 0);
+		int devnull = open("/dev/null", O_RDONLY);     /* never the editor's keyboard */
+		if (devnull >= 0) { dup2(devnull, STDIN_FILENO); close(devnull); }
 		dup2(p[1], STDOUT_FILENO);
 		dup2(p[1], STDERR_FILENO);
 		close(p[0]);
 		close(p[1]);
-		execl("/bin/sh", "sh", "-c", r->cmd, (char *)NULL);
+		if (r->cwd[0] && chdir(r->cwd) != 0) _exit(126);
+		if (sandbox) execv(argv[0], argv);
+		else execl("/bin/sh", "sh", "-c", r->cmd, (char *)NULL);
 		_exit(127);
 	}
+	if (!sandbox) setpgid(pid, pid);       /* (setsid needs it not to be a group leader yet) */
 	close(p[1]);
 	r->fp = fdopen(p[0], "r");
 	r->pid = pid;
@@ -7239,9 +8813,139 @@ static void runnerStart(const char *cmd) {
 		return;
 	}
 	r->thread_valid = 1;
-	editorSetStatusMessage("▶ %s", r->cmd);
-	E.full_redraw_pending = 1;
+	if (!r->console) editorSetStatusMessage("▶ %s", r->cmd);
 #endif
+}
+
+static void runnerStart(const char *cmd) {
+	runnerSpawn(cmd, E.bottom_panel && E.bottom_panel->runner && E.bottom_panel->runner->console, 0);
+}
+
+/* :console: a shell line under the runner's output, in the project dir */
+static void hkConsoleToggle(void) {
+	if (E.bottom_panel && E.bottom_panel->runner && E.bottom_panel->runner->console) {
+		hkCloseSidePanel(&E.bottom_panel, NULL);
+		return;
+	}
+	runnerData *r = runnerEnsurePane();
+	if (!r) return;
+	r->console = 1;
+	if (E.active_pane) E.active_pane->is_focused = 0;
+	E.active_pane = E.bottom_panel;
+	E.bottom_panel->is_focused = 1;
+	editorSetStatusMessage("console: %s%s", r->cwd, E.console_sandbox ? " (sandboxed)" : "");
+}
+
+/* dir/name into dst, or 0 when it would not fit (never a clipped path) */
+static int hkFmtFits(char *dst, size_t cap, const char *dir, const char *name) {
+	size_t a = strlen(dir), b = strlen(name);
+	if (a + 1 + b + 1 > cap) return 0;
+	memcpy(dst, dir, a);
+	dst[a] = '/';
+	memcpy(dst + a + 1, name, b + 1);
+	return 1;
+}
+
+static void hkConsoleRun(runnerData *r) {
+	char line[sizeof(r->input)];
+	snprintf(line, sizeof(line), "%s", r->input);
+	r->input_len = r->input_cur = 0;
+	r->input[0] = '\0';
+	const char *c = line;
+	while (*c == ' ') c++;
+	if (!*c) return;
+	if (r->hist_n == 0 || strcmp(r->hist[r->hist_n - 1], c) != 0) {
+		char **nh = realloc(r->hist, sizeof(char *) * (r->hist_n + 1));
+		if (nh) { r->hist = nh; r->hist[r->hist_n++] = strdup(c); }
+	}
+	r->hist_pos = r->hist_n;
+	char echo[sizeof(line) + 4];
+	snprintf(echo, sizeof(echo), "$ %s", c);
+	runnerAppend(r, echo);
+	if (!strcmp(c, "clear")) {
+		pthread_mutex_lock(&r->lock);
+		for (int i = 0; i < r->count; i++) free(r->lines[i]);
+		r->count = r->selected = r->scroll_offset = 0;
+		pthread_mutex_unlock(&r->lock);
+		return;
+	}
+	if (!strcmp(c, "exit")) { hkCloseSidePanel(&E.bottom_panel, NULL); return; }
+	if (!strcmp(c, "cd") || !strncmp(c, "cd ", 3)) {
+		const char *d = c[2] ? c + 3 : "";
+		while (*d == ' ') d++;
+		char want[PATH_MAX], real[PATH_MAX];
+		if (!*d || *d == '~') snprintf(want, sizeof(want), "%s%s", getenv("HOME") ? getenv("HOME") : "/", *d ? d + 1 : "");
+		else if (*d == '/') snprintf(want, sizeof(want), "%s", d);
+		else if (!hkFmtFits(want, sizeof(want), r->cwd, d)) { runnerAppend(r, "cd: path too long"); return; }
+		struct stat st;
+		if (realpath(want, real) && stat(real, &st) == 0 && S_ISDIR(st.st_mode)) snprintf(r->cwd, sizeof(r->cwd), "%s", real);
+		else runnerAppend(r, "cd: no such directory");
+		return;
+	}
+	runnerSpawn(c, 1, E.console_sandbox);
+}
+
+static void hkConsoleKey(editorPane *pane, runnerData *r, int key) {
+	(void)pane;
+	pthread_mutex_lock(&r->lock);
+	int running = r->running;
+	pthread_mutex_unlock(&r->lock);
+	switch (key) {
+	case '\r':
+		if (running) { editorSetStatusMessage("still running: ctrl-c stops it"); break; }
+		hkConsoleRun(r);
+		break;
+	case CTRL_KEY('c'):
+		if (running) { runnerStop(r); runnerAppend(r, "^C"); }
+		else { r->input_len = r->input_cur = 0; r->input[0] = '\0'; }
+		break;
+	case '\x1b': {
+		editorPane *ed = hkFirstEditorLeaf();             /* back to the file; the console stays */
+		if (ed) { pane->is_focused = 0; E.active_pane = ed; ed->is_focused = 1; }
+		break;
+	}
+	case BACKSPACE: case CTRL_KEY('h'):
+		if (r->input_cur > 0) {
+			memmove(r->input + r->input_cur - 1, r->input + r->input_cur, r->input_len - r->input_cur + 1);
+			r->input_cur--; r->input_len--;
+		}
+		break;
+	case DEL_KEY: case CTRL_KEY('d'):
+		if (r->input_cur < r->input_len) {
+			memmove(r->input + r->input_cur, r->input + r->input_cur + 1, r->input_len - r->input_cur);
+			r->input_len--;
+		}
+		break;
+	case ARROW_LEFT: case CTRL_KEY('b'): if (r->input_cur > 0) r->input_cur--; break;
+	case ARROW_RIGHT: case CTRL_KEY('f'): if (r->input_cur < r->input_len) r->input_cur++; break;
+	case HOME_KEY: case CTRL_KEY('a'): r->input_cur = 0; break;
+	case END_KEY: case CTRL_KEY('e'): r->input_cur = r->input_len; break;
+	case CTRL_KEY('u'): r->input_len = r->input_cur = 0; r->input[0] = '\0'; break;
+	case ARROW_UP: case ARROW_DOWN: case CTRL_KEY('p'): case CTRL_KEY('n'): {
+		int up = key == ARROW_UP || key == CTRL_KEY('p');
+		if (up && r->hist_pos > 0) r->hist_pos--;
+		else if (!up && r->hist_pos < r->hist_n) r->hist_pos++;
+		else break;
+		const char *h = r->hist_pos < r->hist_n ? r->hist[r->hist_pos] : "";
+		snprintf(r->input, sizeof(r->input), "%s", h);
+		r->input_len = r->input_cur = (int)strlen(r->input);
+		break;
+	}
+	case PAGE_UP: case PAGE_DOWN:
+		pthread_mutex_lock(&r->lock);
+		r->selected += key == PAGE_UP ? -(pane->height - 2) : pane->height - 2;
+		if (r->selected < 0) r->selected = 0;
+		if (r->selected >= r->count) r->selected = r->count ? r->count - 1 : 0;
+		pthread_mutex_unlock(&r->lock);
+		break;
+	default:
+		if (key >= 32 && key < 256 && key != 127 && r->input_len < (int)sizeof(r->input) - 1) {
+			memmove(r->input + r->input_cur + 1, r->input + r->input_cur, r->input_len - r->input_cur + 1);
+			r->input[r->input_cur++] = (char)key;
+			r->input_len++;
+		}
+		break;
+	}
 }
 
 static void runnerErrorStep(int dir) {
@@ -7297,8 +9001,11 @@ void runnerRender(editorPane *pane, struct abuf *ab) {
 	if (!r || pane->height <= 0) return;
 	pthread_mutex_lock(&r->lock);
 
-	char header[256];
-	if (r->running)
+	char header[PATH_MAX + 64];
+	if (r->console)
+		snprintf(header, sizeof(header), " console  %.200s%s%s", r->cwd, E.console_sandbox ? "  [sandboxed]" : "",
+			r->running ? "  [running: ctrl-c stops]" : "");
+	else if (r->running)
 		snprintf(header, sizeof(header), " ▶ %.180s  [running]", r->cmd);
 	else
 		snprintf(header, sizeof(header), " ▶ %.140s  [exit %d]  enter=jump  a=%s  r=rerun  q=close",
@@ -7307,7 +9014,14 @@ void runnerRender(editorPane *pane, struct abuf *ab) {
 	for (int x = used; x < pane->width; x++)
 		gridPutCh(pane->x + x, pane->y, ' ', E.theme.status_fg, E.theme.status_bg);
 
-	int body = pane->height - 1;
+	int body = pane->height - 1 - (r->console ? 1 : 0);
+	if (r->console && body > 0) {            /* the prompt line under the output */
+		int gy = pane->y + pane->height - 1;
+		Color pc = E.theme.keyword1;
+		int u = gridPutStr(pane->x, gy, r->running ? "  " : "$ ", 2, pc, E.theme.bg);
+		u += gridPutStr(pane->x + u, gy, r->input, pane->width - u, E.theme.fg, E.theme.bg);
+		for (int x = u; x < pane->width; x++) gridPutCh(pane->x + x, gy, ' ', E.theme.fg, E.theme.bg);
+	}
 	if (r->selected >= r->count) r->selected = r->count ? r->count - 1 : 0;
 	if (r->selected < 0) r->selected = 0;
 	if (r->selected < r->scroll_offset) r->scroll_offset = r->selected;
@@ -7336,6 +9050,7 @@ void runnerRender(editorPane *pane, struct abuf *ab) {
 void runnerHandleKey(editorPane *pane, int key) {
 	runnerData *r = pane->runner;
 	if (!r) return;
+	if (r->console) { hkConsoleKey(pane, r, key); return; }
 	switch (key) {
 	case 'j':
 	case ARROW_DOWN:
@@ -7480,24 +9195,6 @@ void aiInit(editorPane *pane) {
 	data->prompt_capacity = 256;
 	pthread_mutex_init(&data->lock, NULL);
 
-	const char *mascot[] = {
-		"  ▄█████▄ ",
-		" ██ ███ ██",
-		" █████████",
-		" ▀█▀▀█▀▀█▀",
-		NULL
-	};
-	for (int i = 0; mascot[i]; i++) {
-		if (data->history_count < AI_HISTORY_MAX)
-			data->history[data->history_count++] = strdup(mascot[i]);
-	}
-
-	char line[128];
-	data->history[data->history_count++] = strdup("-----");
-	snprintf(line, sizeof(line), "%s (powered by hako)", E.ai_name);
-	data->history[data->history_count++] = strdup(line);
-	data->history[data->history_count++] = strdup("-----");
-
 	pane->ai = data;
 
 	int rc = hakoLaunch(data);
@@ -7514,7 +9211,7 @@ void aiInit(editorPane *pane) {
 		data->history[data->history_count++] = strdup("Could not start the agent (launch error).");
 		data->history[data->history_count++] = strdup("'i' to try again | :install-agent | /help");
 	} else {
-		data->history[data->history_count++] = strdup("'i' chat \xC2\xB7 :help for the commands (hako's: :provider :model :sessions \xE2\x80\xA6)");
+		data->history[data->history_count++] = strdup("i to type \xC2\xB7 : or / for hako's commands");
 	}
 }
 
@@ -7589,8 +9286,50 @@ void aiHandleKey(editorPane *pane, int key) {
 	if (data->mode == MODE_INSERT) {
 		if (data->prompt_cursor < 0) data->prompt_cursor = 0;
 		if (data->prompt_cursor > data->prompt_len) data->prompt_cursor = data->prompt_len;
+		int menu[64];
+		int nmenu = hkReiMenuRows(pane, hkReiMatches(data, menu, 64)) ? hkReiMatches(data, menu, 64) : 0;
+		if (nmenu && (key == ARROW_UP || key == ARROW_DOWN)) {
+			data->cmd_sel += key == ARROW_DOWN ? 1 : -1;
+			if (data->cmd_sel < 0) data->cmd_sel = nmenu - 1;
+			if (data->cmd_sel >= nmenu) data->cmd_sel = 0;
+			pthread_mutex_unlock(&data->lock);
+			return;
+		}
+		if (nmenu && key == '\t') {                     /* complete the picked command */
+			const hkCmd *c = &hk_cmds[menu[data->cmd_sel < nmenu ? data->cmd_sel : 0]];
+			int l = snprintf(data->prompt_buffer, data->prompt_capacity, "%s%s%s", c->p, c->n, c->a[0] ? " " : "");
+			if (l >= data->prompt_capacity) l = data->prompt_capacity - 1;
+			data->prompt_len = data->prompt_cursor = l;
+			data->cmd_sel = 0;
+			pthread_mutex_unlock(&data->lock);
+			return;
+		}
+		/* a : or / line is one line: enter runs it (the picked entry when what is
+		   typed is the start of its name) */
+		if (key == '\r' && data->prompt_len > 1 && (data->prompt_buffer[0] == ':' || data->prompt_buffer[0] == '/') &&
+		    !strchr(data->prompt_buffer, '\n')) {
+			if (nmenu) {
+				const hkCmd *c = &hk_cmds[menu[data->cmd_sel < nmenu ? data->cmd_sel : 0]];
+				if (!strncmp(c->n, data->prompt_buffer + 1, strlen(data->prompt_buffer + 1))) {
+					int l = snprintf(data->prompt_buffer, data->prompt_capacity, "%s%s", c->p, c->n);
+					if (l >= data->prompt_capacity) l = data->prompt_capacity - 1;
+					data->prompt_len = data->prompt_cursor = l;
+				}
+			}
+			data->cmd_sel = 0;
+			data->cmd_hide = 0;
+			int r = aiSubmitPrompt(data);
+			pthread_mutex_unlock(&data->lock);
+			if (r == 2) editorToggleAI();
+			return;
+		}
+		if (key != ARROW_LEFT && key != ARROW_RIGHT && key != HOME_KEY && key != END_KEY && key != '\x1b') {
+			data->cmd_hide = 0;
+			data->cmd_sel = 0;
+		}
 		switch (key) {
 		case '\x1b':
+			if (nmenu) { data->cmd_hide = 1; break; }   /* the first esc closes the menu only */
 			data->mode = MODE_NORMAL;
 			editorSetStatusMessage("-- AI NORMAL --");
 			break;
@@ -7922,7 +9661,142 @@ void editorToggleAI() {
 
 	editorResizePanes();
 	
-	editorSetStatusMessage("Rei Assistant - 'i' for insert, ESC for normal, 'v' for visual");
+	editorSetStatusMessage("%s: i to type, esc then enter to send", E.ai_name);
+}
+
+/* hako's look: a turn opens with the keystone and runs down a rail; tools hang
+   off it; your lines are marked ›, notices ·. */
+static const char *hkReiPrefix(aiData *data, int idx, int sub, Color *pfx, Color *body) {
+	unsigned char raw = data->history_role[idx];
+	int role = raw & 0x7f, cont = (raw & HK_ROLE_CONT) || sub > 0;
+	const char *text = data->history[idx];
+	*pfx = E.theme.keyword1;
+	*body = E.theme.fg;
+	switch (role) {
+	case HK_ROLE_USER:
+		return cont ? "  " : "\xE2\x80\xBA ";
+	case HK_ROLE_AI: {
+		if (text && text[0] == '>' && (text[1] == ' ' || text[1] == '\0')) *body = E.theme.comment;
+		if (cont) return "\xE2\x94\x82 ";
+		int k = idx - 1;
+		while (k >= 0 && (data->history_role[k] & 0x7f) == HK_ROLE_SYSTEM && !data->history[k][0]) k--;
+		int prev = k >= 0 ? (data->history_role[k] & 0x7f) : -1;
+		return (prev == HK_ROLE_AI || prev == HK_ROLE_TOOL || prev == HK_ROLE_TOOLOUT) ? "\xE2\x94\x82 " : "\xE2\x97\x86 ";
+	}
+	case HK_ROLE_TOOL:
+		*body = E.theme.keyword2;
+		return cont ? "\xE2\x94\x82 " : "\xE2\x94\x9C ";
+	case HK_ROLE_TOOLOUT:
+		*body = E.theme.comment;
+		return "\xE2\x94\x82 ";
+	default:
+		*pfx = *body = E.theme.comment;
+		if (!text || !*text) return "  ";
+		if (!strncmp(text, "Error", 5) || !strncmp(text, "error", 5)) { *pfx = *body = E.theme.err; return cont ? "  " : "! "; }
+		return cont ? "  " : "\xC2\xB7 ";
+	}
+}
+
+/* The commands that match the input line (it starts with : or /): exact name,
+   then by prefix, then anywhere in the name. */
+static int hkReiMatches(aiData *data, int *out, int max) {
+	if (!hk_cmd_n || data->cmd_hide || data->prompt_len < 1) return 0;
+	const char *b = data->prompt_buffer;
+	if ((b[0] != ':' && b[0] != '/') || strchr(b, ' ') || strchr(b, '\n')) return 0;
+	const char *w = b + 1;
+	size_t wl = strlen(w);
+	int n = 0;
+	for (int pass = 0; pass < 3 && n < max; pass++) {
+		for (int i = 0; i < hk_cmd_n && n < max; i++) {
+			const char *nm = hk_cmds[i].n;
+			int hit = pass == 0 ? !strcmp(nm, w) : pass == 1 ? (!strncmp(nm, w, wl) && strcmp(nm, w)) :
+			          (wl && strstr(nm, w) && strncmp(nm, w, wl));
+			if (hit) out[n++] = i;
+		}
+	}
+	return n;
+}
+
+static int hkReiMenuRows(editorPane *pane, int n) {
+	int cap = pane->height / 3;
+	if (cap > 8) cap = 8;
+	if (pane->height < 12) return 0;
+	return n < cap ? n : cap;
+}
+
+static void hkReiDrawMenu(editorPane *pane, aiData *data, int history_end, int inner_w) {
+	if (data->mode != MODE_INSERT) return;
+	int m[64];
+	int n = hkReiMatches(data, m, 64);
+	int rows = hkReiMenuRows(pane, n);
+	if (rows <= 0) return;
+	if (data->cmd_sel >= n) data->cmd_sel = n - 1;
+	if (data->cmd_sel < 0) data->cmd_sel = 0;
+	int top = data->cmd_sel >= rows ? data->cmd_sel - rows + 1 : 0;
+	int wide = pane->width >= 50;
+	for (int r = 0; r < rows; r++) {
+		const hkCmd *c = &hk_cmds[m[top + r]];
+		int gy = pane->y + history_end + 1 - rows + r;
+		int sel = top + r == data->cmd_sel;
+		Color fg = sel ? E.theme.visual_fg : E.theme.fg, bg = sel ? E.theme.visual_bg : E.theme.bg;
+		Color dim = sel ? fg : E.theme.comment;
+		char left[160];
+		if (wide) snprintf(left, sizeof(left), " %s%-12s %-10s %s", c->p, c->n, c->a, c->d);
+		else snprintf(left, sizeof(left), " %s%s", c->p, c->n);
+		int x0 = pane->x + 2;
+		for (int x = 0; x < inner_w; x++) gridPutCh(x0 + x, gy, ' ', fg, bg);
+		int used = gridPutStr(x0, gy, left, inner_w, fg, bg);
+		int cl = (int)strlen(c->c);
+		if (wide && used + cl + 2 < inner_w) gridPutStr(x0 + inner_w - cl - 1, gy, c->c, cl, dim, bg);
+	}
+}
+
+/* "commands":[{"n":..,"p":..,"c":..,"a":..,"d":..}, ...] in hako's init or state */
+static void hkReiParseCommands(const char *line) {
+	const char *arr = strstr(line, "\"commands\":[");
+	if (!arr) return;
+	const char *p = arr + 12;
+	hkCmd *list = NULL;
+	int n = 0;
+	while (*p && *p != ']') {
+		while (*p == ' ' || *p == ',') p++;
+		if (*p != '{') break;
+		const char *st = p;
+		int depth = 0, instr = 0;
+		for (; *p; p++) {
+			if (instr) { if (*p == '\\' && p[1]) p++; else if (*p == '"') instr = 0; continue; }
+			if (*p == '"') instr = 1;
+			else if (*p == '{') depth++;
+			else if (*p == '}' && --depth == 0) { p++; break; }
+		}
+		size_t len = (size_t)(p - st);
+		char *obj = malloc(len + 1);
+		if (!obj) break;
+		memcpy(obj, st, len);
+		obj[len] = '\0';
+		hkCmd c;
+		memset(&c, 0, sizeof(c));
+		const char *keys[5] = {"n", "p", "c", "a", "d"};
+		char *dst[5] = {c.n, c.p, c.c, c.a, c.d};
+		size_t dsz[5] = {sizeof(c.n), sizeof(c.p), sizeof(c.c), sizeof(c.a), sizeof(c.d)};
+		for (int k = 0; k < 5; k++) {
+			char *raw = hkExtractJsonString(obj, keys[k]);
+			char *v = raw ? hkJsonUnescapeDup(raw) : NULL;
+			if (v) snprintf(dst[k], dsz[k], "%s", v);
+			free(v);
+			free(raw);
+		}
+		free(obj);
+		if (!c.n[0]) continue;
+		if (!c.p[0]) snprintf(c.p, sizeof(c.p), ":");
+		hkCmd *nl = realloc(list, sizeof(hkCmd) * (n + 1));
+		if (!nl) break;
+		list = nl;
+		list[n++] = c;
+	}
+	free(hk_cmds);
+	hk_cmds = list;
+	hk_cmd_n = n;
 }
 
 void aiRender(editorPane *pane, struct abuf *ab) {
@@ -7952,8 +9826,7 @@ void aiRender(editorPane *pane, struct abuf *ab) {
 	for (int i = 0; i < data->history_count; i++) {
 		int seg_cols_w = inner_w - 2;
 		if (seg_cols_w < 1) seg_cols_w = 1;
-		int dw = utf8_display_width(data->history[i]);
-		int rows = dw > 0 ? (dw + seg_cols_w - 1) / seg_cols_w : 1;
+		int rows = hkReiWrap(data->history[i], seg_cols_w, -1, NULL, NULL, NULL);
 		if (rows < 1) rows = 1;
 		for (int s = 0; s < rows; s++) {
 			if (total_vis >= owner_cap) {
@@ -7997,12 +9870,21 @@ void aiRender(editorPane *pane, struct abuf *ab) {
 			Color hf = E.theme.status_fg;
 			Color hb = E.theme.status_bg;
 			char header[64];
-			snprintf(header, sizeof(header), " %s %s ", E.ai_kanji, E.ai_name);
+			snprintf(header, sizeof(header), " %s ", E.ai_name);
 			int max = pane->width - 1;
 			int used = gridPutStr(gx + 1, gy, header, max, hf, hb);
 			for (int x = used; x < max; x++) {
 				gridPutCh(gx + 1 + x, gy, ' ', hf, hb);
 			}
+			/* the chat's name, highlighted (no brackets), as hako's bar shows it */
+			if (E.hako_session_name[0] && used + 3 < max) {
+				char chip[80];
+				snprintf(chip, sizeof(chip), " %s ", E.hako_session_name);
+				Color cf = E.theme.bg, cb = E.theme.keyword1;
+				if (cf.r < 0 || cb.r < 0) { cf = E.theme.keyword1; cf.a |= HK_A_REV; cb = E.theme.bg; }
+				used += 1 + gridPutStr(gx + 2 + used, gy, chip, max - used - 1, cf, cb);
+			}
+			if (E.hako_remote && used + 8 < max) gridPutStr(gx + 2 + used, gy, " remote", max - used - 1, E.theme.string, hb);
 		} else if (y == 1 || y == history_end + 1) {
 			int used = 0;
 			while (used < pane->width - 1) {
@@ -8075,29 +9957,17 @@ void aiRender(editorPane *pane, struct abuf *ab) {
 				char *text = data->history[msg_idx];
 				int seg_max = inner_w - 2;
 				int byte_off = 0, seg_len = 0, seg_cols = 0;
-				utf8_slice(text, sub * seg_max, seg_max, &byte_off, &seg_len, &seg_cols);
+				hkReiWrap(text, seg_max, sub, &byte_off, &seg_len, &seg_cols);
 
 				int is_selected = (data->visual_mode &&
 					msg_idx >= MIN(data->visual_start, data->visual_end) &&
 					msg_idx <= MAX(data->visual_start, data->visual_end));
-				unsigned char role = data->history_role[msg_idx];
-
-				Color bar_fg, body_fg, row_bg;
+				Color bar_fg, body_fg, row_bg = E.theme.bg;
+				const char *bar = hkReiPrefix(data, msg_idx, sub, &bar_fg, &body_fg);
 				if (is_selected) {
-					bar_fg = E.theme.visual_fg;
-					body_fg = E.theme.visual_fg;
+					bar_fg = body_fg = E.theme.visual_fg;
 					row_bg = E.theme.visual_bg;
-				} else {
-					row_bg = E.theme.bg;
-					if (role == HK_ROLE_USER) { bar_fg = E.theme.keyword1; body_fg = E.theme.keyword1; }
-					else if (role == HK_ROLE_AI) { bar_fg = E.theme.string; body_fg = E.theme.fg; }
-					else { bar_fg = E.theme.comment; body_fg = E.theme.comment; }
-					if (role == HK_ROLE_AI && text && text[0] == '>' && (text[1] == ' ' || text[1] == '\0')) {
-						body_fg = E.theme.comment;
-					}
 				}
-
-				const char *bar = (role == HK_ROLE_USER || role == HK_ROLE_AI) ? "▌ " : "  ";
 				gridPutStr(cx, gy, bar, 2, bar_fg, row_bg);
 				cx += 2;
 
@@ -8121,6 +9991,8 @@ void aiRender(editorPane *pane, struct abuf *ab) {
 			gridPutCh(cx, gy, ' ', E.theme.fg, E.theme.bg);
 		}
 	}
+
+	hkReiDrawMenu(pane, data, history_end, inner_w);
 
 	free(line_owner);
 	free(line_sub);
@@ -8272,11 +10144,12 @@ static void aiAddHistoryLine(aiData *data, const char *text, int text_len, unsig
 	while (pos < text_len) {
 		if (data->history_count >= AI_HISTORY_MAX) break;
 		int end = pos + max_width;
-		if (end >= text_len) { aiPushHistoryLine(data, text + pos, text_len - pos, role); break; }
+		unsigned char r = pos ? (role | HK_ROLE_CONT) : role;
+		if (end >= text_len) { aiPushHistoryLine(data, text + pos, text_len - pos, r); break; }
 		int wrap = end;
 		while (wrap > pos && text[wrap] != ' ') wrap--;
 		if (wrap == pos) wrap = end;
-		aiPushHistoryLine(data, text + pos, wrap - pos, role);
+		aiPushHistoryLine(data, text + pos, wrap - pos, r);
 		pos = wrap;
 		while (pos < text_len && text[pos] == ' ') pos++;
 	}
@@ -8285,8 +10158,9 @@ static void aiAddHistoryLine(aiData *data, const char *text, int text_len, unsig
 void aiAddHistoryRole(aiData *data, const char *text, unsigned char role) {
 	if (!data || !text) return;
 	if (data->history_count > 0 && data->history_count < AI_HISTORY_MAX - 1) {
-		unsigned char prev = data->history_role[data->history_count - 1];
-		int role_swap = (prev != role) &&
+		unsigned char prev = data->history_role[data->history_count - 1] & 0x7f;
+		int role_swap = (prev != role) && role != HK_ROLE_TOOL && role != HK_ROLE_TOOLOUT &&
+		    prev != HK_ROLE_TOOL && prev != HK_ROLE_TOOLOUT &&
 		    (prev == HK_ROLE_USER || prev == HK_ROLE_AI ||
 		     role == HK_ROLE_USER || role == HK_ROLE_AI);
 		char *prev_text = data->history[data->history_count - 1];
@@ -8294,17 +10168,32 @@ void aiAddHistoryRole(aiData *data, const char *text, unsigned char role) {
 			aiPushHistoryLine(data, "", 0, HK_ROLE_SYSTEM);
 	}
 	const char *p = text;
+	unsigned char r = role;
 	while (1) {
 		const char *nl = strchr(p, '\n');
 		int seg = nl ? (int)(nl - p) : (int)strlen(p);
-		aiAddHistoryLine(data, p, seg, role);
+		aiAddHistoryLine(data, p, seg, r);
 		if (!nl) break;
 		p = nl + 1;
+		r = role | HK_ROLE_CONT;
 	}
 }
 
 void aiAddHistory(aiData *data, const char *text) {
 	aiAddHistoryRole(data, text, HK_ROLE_SYSTEM);
+}
+
+/* session_name and remote, from init or state (absent on an older hako) */
+static void hkReiSessionFields(const char *line) {
+	char *nm = hkExtractJsonString(line, "session_name");
+	if (nm) {
+		char *u = hkJsonUnescapeDup(nm);
+		snprintf(E.hako_session_name, sizeof(E.hako_session_name), "%s", u ? u : nm);
+		free(u);
+		free(nm);
+	}
+	const char *r = strstr(line, "\"remote\":");
+	if (r) E.hako_remote = !strncmp(r + 9, "true", 4) || r[9] == '1';
 }
 
 static void hakoHandleEvent(aiData *data, const char *line) {
@@ -8326,25 +10215,16 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 		E.hako_session_resumed = resumed > 0 ? 1 : 0;
 		E.hako_protocol        = protocol > 0 ? protocol : 1;
 
+		hkReiParseCommands(line);
+		hkReiSessionFields(line);
 		pthread_mutex_lock(&data->lock);
 		char info[256];
-		if (provider && *provider) {
-			snprintf(info, sizeof(info), "provider: %s%s%s",
-				provider,
-				(model && *model) ? "  model: " : "",
-				(model && *model) ? model : "");
-			aiAddHistory(data, info);
-		}
-		if (version)
-			{ snprintf(info, sizeof(info), "agent: hako v%s (protocol %d)", version, E.hako_protocol); aiAddHistory(data, info); }
-		else
-			aiAddHistory(data, "agent: protocol 1 — tool writes need :auto until you upgrade hako");
-		if (E.hako_session_resumed && E.hako_session_turns > 0) {
-			snprintf(info, sizeof(info), "session: resumed (%d turns)", E.hako_session_turns);
-			aiAddHistory(data, info);
-		} else {
-			aiAddHistory(data, "session: new");
-		}
+		snprintf(info, sizeof(info), "hako %s%s%s%s%s%s",
+			version ? version : "(protocol 1: tool writes need :auto)",
+			(provider && *provider) ? " \xC2\xB7 " : "", provider ? provider : "",
+			(model && *model) ? " \xC2\xB7 " : "", model ? model : "",
+			E.hako_session_resumed && E.hako_session_turns > 0 ? " \xC2\xB7 resumed" : "");
+		aiAddHistory(data, info);
 		pthread_mutex_unlock(&data->lock);
 
 		free(provider);
@@ -8355,8 +10235,11 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 		/* A menu pick in hako says nothing in the chat; it lands here, in the status line. */
 		char *provider = hkExtractJsonString(line, "provider");
 		char *model    = hkExtractJsonString(line, "model");
-		editorSetStatusMessage("Rei: %s%s%s", provider ? provider : "",
-			(model && *model) ? " · " : "", model ? model : "");
+		hkReiParseCommands(line);
+		hkReiSessionFields(line);
+		if (provider || model)
+			editorSetStatusMessage("Rei: %s%s%s", provider ? provider : "",
+				(model && *model) ? " · " : "", model ? model : "");
 		free(provider);
 		free(model);
 
@@ -8379,9 +10262,14 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 	} else if (strcmp(type, "tool_start") == 0 || strcmp(type, "tool_end") == 0) {
 		char *display = hkExtractJsonString(line, "display");
 		if (display) {
+			char *u = hkJsonUnescapeDup(display);
+			char row[600];
+			int start = type[5] == 's';
+			snprintf(row, sizeof(row), "%s%.560s", start ? "" : "  ", u ? u : display);
 			pthread_mutex_lock(&data->lock);
-			aiAddHistory(data, display);
+			aiAddHistoryRole(data, row, start ? HK_ROLE_TOOL : HK_ROLE_TOOLOUT);
 			pthread_mutex_unlock(&data->lock);
+			free(u);
 			free(display);
 		}
 
@@ -8404,7 +10292,7 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 					char row[256];
 					snprintf(row, sizeof(row), "  %.*s", n < 240 ? n : 240, q);
 					pthread_mutex_lock(&data->lock);
-					aiAddHistory(data, row);
+					aiAddHistoryRole(data, row, HK_ROLE_TOOLOUT);
 					pthread_mutex_unlock(&data->lock);
 					shown++;
 				}
@@ -8413,7 +10301,7 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 			}
 			if (*q) {
 				pthread_mutex_lock(&data->lock);
-				aiAddHistory(data, "  …");
+				aiAddHistoryRole(data, "  …", HK_ROLE_TOOLOUT);
 				pthread_mutex_unlock(&data->lock);
 			}
 			free(u); free(text);
@@ -8624,9 +10512,11 @@ static char *hakoFindBinary(void) {
 static int hakoLaunch(aiData *data) {
 #ifdef HAKE_NO_AGENT
 	(void)data; (void)hakoReaderThread; (void)g_hako_reader;
+	(void)hakoFindBinary; (void)g_hako_data; (void)g_hako_reader_valid; (void)g_hako_pid;
 	return -3;
 #elif defined(_WIN32)
 	(void)data; (void)hakoReaderThread; (void)g_hako_reader;
+	(void)hakoFindBinary; (void)g_hako_data; (void)g_hako_reader_valid; (void)g_hako_pid;
 	return -2;
 #else
 	char *bin = hakoFindBinary();
@@ -8774,6 +10664,17 @@ void aiWorkerSend(aiData *data) {
 	hakoSendLine(json);
 }
 
+/* :voice and friends typed at the editor go to hako, which owns them */
+static void hkAgentSlash(const char *cmd) {
+	if (!E.right_panel || E.right_panel->type != PANE_AI || !E.right_panel->ai) {
+		editorSetStatusMessage(":%s is hako's: open the agent with :rei first", cmd);
+		return;
+	}
+	char line[300];
+	snprintf(line, sizeof(line), ":%s", cmd);
+	hkHandleSlash(E.right_panel->ai, line);
+}
+
 int hkHandleSlash(aiData *data, const char *prompt) {
 	if (!data) return 0;
 	if (!strcmp(prompt, "/quit") || !strcmp(prompt, "/q") || !strcmp(prompt, ":quit") || !strcmp(prompt, ":q")) return 2;
@@ -8792,132 +10693,62 @@ int hkHandleSlash(aiData *data, const char *prompt) {
 	return 0;
 }
 
-static const char *hkRcVal(char **ek, char **ev, int en, const char *key, char *used) {
-	for (int i = 0; i < en; i++) {
-		if (strcmp(ek[i], key) == 0) {
-			if (used) used[i] = 1;
-			return ev[i];
-		}
-	}
-	return NULL;
-}
-
-static const char *hkRcOr(char **ek, char **ev, int en, const char *key, char *used, const char *def) {
-	const char *v = hkRcVal(ek, ev, en, key, used);
-	return v ? v : def;
-}
+/* :config opens the rc (a short commented one is written when there is none);
+   :config key=value sets one key in place and applies it now. */
+static const char *HK_RC_TEMPLATE =
+	"# ~/.hakorc: one file for hake, hako and hako studio (key=value, # comments)\n"
+	"# a key prefixed edit., code. or studio. is that tool's and beats the plain one\n"
+	"# a project's own .hakorc is read on top of this one\n"
+	"\n"
+	"# theme=terminal          # the profile's own colors; or mithraeum, washi, gruvbox, nord ...\n"
+	"# theme.mine.base=nord    # a custom theme: theme.<name>.<slot>=#rrggbb | ansiN | default\n"
+	"# theme.mine.comment=#7a7a7a\n"
+	"\n"
+	"# edit.keys=vim           # vim, emacs or nano\n"
+	"# show_line_numbers=0\n"
+	"# status_line=1           # 0 never, 1 with more than one pane, 2 always\n"
+	"# word_wrap=1\n"
+	"# tab_stop=8\n"
+	"# use_tabs=1\n"
+	"# mouse=1\n"
+	"# build_cmd=make          # :build\n"
+	"# test_cmd=make test      # :test\n"
+	"# run_cmd=./a.out         # :run\n"
+	"# console_sandbox=1       # :console runs under sandbox-exec or bwrap (global rc only)\n";
 
 void editorGenerateConfig(void) {
-	const char *home = getenv("HOME");
-	if (!home) { editorSetStatusMessage("Cannot find HOME directory"); return; }
-	char path[512];
-	snprintf(path, sizeof(path), "%s/.hakorc", home);
-
-	char *ek[256]; char *ev[256]; char used[256]; int en = 0;
-	memset(used, 0, sizeof(used));
-	FILE *rf = fopen(path, "r");
-	if (rf) {
-		char *ln = NULL; size_t cap = 0;
-		while (en < 256 && getline(&ln, &cap, rf) != -1) {
-			char *s = ln;
-			while (*s == ' ' || *s == '\t') s++;
-			if (*s == '#' || *s == '\n' || *s == '\r' || *s == '\0') continue;
-			char *eq = strchr(s, '=');
-			if (!eq) continue;
-			char *ke = eq;
-			while (ke > s && (ke[-1] == ' ' || ke[-1] == '\t')) ke--;
-			*ke = '\0';
-			char *v = eq + 1;
-			while (*v == ' ' || *v == '\t') v++;
-			v[strcspn(v, "\r\n")] = 0;
-			ek[en] = strdup(s); ev[en] = strdup(v); en++;
-		}
-		free(ln);
-		fclose(rf);
+	if (!E.config_path) { editorSetStatusMessage("no HOME: nowhere to keep a config"); return; }
+	if (!hkFileExists(E.config_path)) {
+		FILE *fp = fopen(E.config_path, "w");
+		if (!fp) { editorSetStatusMessage("cannot create %s: %s", E.config_path, strerror(errno)); return; }
+		fputs(HK_RC_TEMPLATE, fp);
+		fclose(fp);
 	}
+	hkOpenPath(E.config_path);
+}
 
-	FILE *fp = fopen(path, "w");
-	if (!fp) { editorSetStatusMessage("Cannot create config file: %s", strerror(errno)); return; }
-
-	char theme[64];
-	snprintf(theme, sizeof(theme), "%s", hkRcOr(ek, ev, en, "theme", used, "mithraeum"));
-
-	fprintf(fp, "# 箱 Hako — unified config (editor · agent · models)\n");
-	fprintf(fp, "# One file, read by hake (editor), hako (agent), hakm (models).\n");
-	fprintf(fp, "# Regenerating preserves every existing key, including other tools'.\n\n");
-
-	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "#  Shared\n");
-	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "# Preset: mithraeum, washi, dark, light, gruvbox, nord, dracula, monokai,\n");
-	fprintf(fp, "# solarized, tokyonight, catppuccin, onedark, material, everforest,\n");
-	fprintf(fp, "# rosepine, github-dark, github-light, ayu, kanagawa\n");
-	fprintf(fp, "# The same list in hake, hako and hako studio.\n");
-	fprintf(fp, "theme=%s\n\n", theme);
-
-	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "#  Editor (hake)\n");
-	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "tab_stop=%s\n",             hkRcOr(ek, ev, en, "tab_stop", used, "4"));
-	fprintf(fp, "use_tabs=%s\n",             hkRcOr(ek, ev, en, "use_tabs", used, "1"));
-	fprintf(fp, "word_wrap=%s\n",            hkRcOr(ek, ev, en, "word_wrap", used, "1"));
-	fprintf(fp, "show_line_numbers=%s\n",    hkRcOr(ek, ev, en, "show_line_numbers", used, "1"));
-	fprintf(fp, "max_undo_levels=%s\n",      hkRcOr(ek, ev, en, "max_undo_levels", used, "100"));
-	fprintf(fp, "auto_indent=%s\n",          hkRcOr(ek, ev, en, "auto_indent", used, "1"));
-	fprintf(fp, "smart_indent=%s\n",         hkRcOr(ek, ev, en, "smart_indent", used, "1"));
-	{
-		/* One key for both tools. Written only when set: a written default would
-		   switch the agent's mouse on too, and that takes the scroll wheel. */
-		const char *mv = hkRcVal(ek, ev, en, "mouse", used);
-		const char *legacy = hkRcVal(ek, ev, en, "mouse_enabled", used);
-		if (!mv) mv = legacy;
-		if (mv) fprintf(fp, "mouse=%s\n", mv);
-		else    fprintf(fp, "# mouse=1            # default: on in hake, off in hako (it takes the scroll wheel)\n");
+static void hkConfigSet(const char *kv, int persist) {
+	char buf[512];
+	snprintf(buf, sizeof(buf), "%s", kv);
+	char *key, *val;
+	if (!hkRcSplit(buf, &key, &val)) { editorSetStatusMessage("usage: key=value"); return; }
+	const char *k = strncmp(key, "edit.", 5) == 0 ? key + 5 : key;
+	int known = hkApplyKey(k, val);
+	E.full_redraw_pending = 0;
+	if (!persist) {
+		editorSetStatusMessage(known ? "%s=%s" : "%s: not a hake setting", k, val);
+		return;
 	}
-	fprintf(fp, "scroll_speed=%s\n",         hkRcOr(ek, ev, en, "scroll_speed", used, "3"));
-	fprintf(fp, "explorer_enabled=%s\n",     hkRcOr(ek, ev, en, "explorer_enabled", used, "1"));
-	fprintf(fp, "explorer_width=%s\n",       hkRcOr(ek, ev, en, "explorer_width", used, "30"));
-	fprintf(fp, "explorer_show_hidden=%s\n", hkRcOr(ek, ev, en, "explorer_show_hidden", used, "0"));
-	const char *bc = hkRcVal(ek, ev, en, "build_cmd", used);
-	const char *tc = hkRcVal(ek, ev, en, "test_cmd", used);
-	const char *rn = hkRcVal(ek, ev, en, "run_cmd", used);
-	if (bc) fprintf(fp, "build_cmd=%s\n", bc); else fprintf(fp, "# build_cmd=make        # :build\n");
-	if (tc) fprintf(fp, "test_cmd=%s\n", tc); else fprintf(fp, "# test_cmd=make test    # :test\n");
-	if (rn) fprintf(fp, "run_cmd=%s\n", rn); else fprintf(fp, "# run_cmd=./a.out       # :run\n");
-	fprintf(fp, "# theme_bg, theme_fg, theme_comment, ... = R,G,B  override preset colors\n\n");
-
-	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "#  Agent (hako / rei) — keys hako reads from this same file\n");
-	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "# ai_provider=mithraeum   # or anthropic, openai, ollama, ...\n");
-	fprintf(fp, "# ai_model=hako-sho\n");
-	fprintf(fp, "# ai_max_tokens=2048\n");
-	fprintf(fp, "# tool_gate=1\n\n");
-
-	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "#  Models (hakm)\n");
-	fprintf(fp, "# ============================================================\n");
-	fprintf(fp, "# model=hako-sho          # default local model\n\n");
-
-	int leftover = 0;
-	for (int i = 0; i < en; i++) if (!used[i]) leftover = 1;
-	if (leftover) {
-		fprintf(fp, "# ============================================================\n");
-		fprintf(fp, "#  Preserved (set by other tools)\n");
-		fprintf(fp, "# ============================================================\n");
-		for (int i = 0; i < en; i++) if (!used[i]) fprintf(fp, "%s=%s\n", ek[i], ev[i]);
-		fprintf(fp, "\n");
-	}
-
-	fclose(fp);
-	for (int i = 0; i < en; i++) { free(ek[i]); free(ev[i]); }
-	editorSetStatusMessage("Config melded: %s (theme=%s)", path, theme);
+	if (hkRcSet(key, val)) editorSetStatusMessage("%s=%s (saved to %s)%s", key, val, hkBaseName(E.config_path),
+	                                              known ? "" : ", not a hake setting");
+	else editorSetStatusMessage("could not write %s", E.config_path);
 }
 
 /*** init ***/
-static const struct { const char *name; Theme t; } HK_THEMES[] = {
-	{"mithraeum",    {{20,19,15},   {232,226,210}, {138,132,115}, {141,153,255}, {255,107,79}, {214,196,150}, {95,90,78},    {38,54,196},   {236,231,218}, {74,88,216},   {38,54,196},  {236,231,218}}},
-	{"washi",        {{236,231,218},{29,28,25},    {98,92,78}, {38,54,196},   {194,49,31},  {107,74,43},   {163,155,136}, {38,54,196},   {236,231,218}, {38,54,196},   {205,210,240},{20,19,15}}},
+/* rgb per slot, in Theme's order (tools/themes.py reads these rows) */
+static const struct { const char *name; unsigned char c[12][3]; } HK_THEMES[] = {
+	{"mithraeum",    {{13,12,10},   {230,224,209}, {138,132,115}, {183,189,202}, {200,186,197}, {220,207,174}, {95,90,78},    {230,224,209}, {13,12,10},    {74,70,61},    {58,54,46},   {242,236,221}}},
+	{"washi",        {{236,231,218},{20,19,15},    {110,104,90}, {47,58,79},    {90,70,54},   {92,82,48},    {163,155,136}, {20,19,15},    {236,231,218}, {110,104,90},  {214,206,186},{20,19,15}}},
 	{"dark",         {{30,30,30},   {212,212,212}, {106,153,85},  {86,156,214},  {78,201,176}, {206,145,120}, {133,133,133}, {50,50,50},    {212,212,212}, {80,80,80},    {38,79,120},  {255,255,255}}},
 	{"light",        {{255,255,255},{30,30,30},    {0,128,0},     {0,0,200},     {0,128,128},  {163,21,21},   {150,150,150}, {220,220,220}, {30,30,30},    {180,180,180}, {173,214,255},{0,0,0}}},
 	{"gruvbox",      {{40,40,40},   {235,219,178}, {146,131,116}, {251,73,52},   {184,187,38}, {184,187,38},  {124,111,100}, {80,73,69},    {235,219,178}, {80,73,69},    {68,65,59},   {235,219,178}}},
@@ -8937,124 +10768,495 @@ static const struct { const char *name; Theme t; } HK_THEMES[] = {
 	{"kanagawa",     {{31,31,40},   {220,215,186}, {114,113,105}, {149,127,184}, {127,180,202},{152,187,108}, {84,84,109},   {42,42,55},    {220,215,186}, {54,54,70},    {43,57,63},   {220,215,186}}},
 };
 
-int editorApplyThemeByName(const char *name) {
-	if (!name) return 0;
-	for (int i = 0; i < (int)(sizeof(HK_THEMES)/sizeof(HK_THEMES[0])); i++) {
+/* terminal: nothing of ours. The profile's default fg/bg, never a painted
+   background, and syntax in its own 16 colors (the same ones hako uses). */
+static const Theme HK_THEME_TERMINAL = {
+	{HK_COL_DEFAULT, 0, 0, 0},              /* bg */
+	{HK_COL_DEFAULT, 0, 0, 0},              /* fg */
+	{HK_COL_ANSI, 8, 0, 0},                 /* comment */
+	{HK_COL_ANSI, 3, 0, 0},                 /* keyword */
+	{HK_COL_ANSI, 6, 0, 0},                 /* type */
+	{HK_COL_ANSI, 2, 0, 0},                 /* string */
+	{HK_COL_ANSI, 8, 0, 0},                 /* line_number */
+	{HK_COL_DEFAULT, 0, 0, HK_A_REV},       /* status_bg: reverse video, like vim */
+	{HK_COL_DEFAULT, 0, 0, 0},              /* status_fg */
+	{HK_COL_ANSI, 8, 0, 0},                 /* border */
+	{HK_COL_DEFAULT, 0, 0, HK_A_REV},       /* visual_bg */
+	{HK_COL_DEFAULT, 0, 0, 0},              /* visual_fg */
+	{HK_COL_ANSI, 5, 0, 0},                 /* number */
+	{HK_COL_ANSI, 1, 0, 0},                 /* err */
+};
+
+/* Slot names a custom theme may set: the suite's shared names, plus hake's own. */
+static const struct { const char *name; size_t off; } HK_SLOTS[] = {
+	{"bg", offsetof(Theme, bg)},               {"fg", offsetof(Theme, fg)},
+	{"comment", offsetof(Theme, comment)},     {"keyword", offsetof(Theme, keyword1)},
+	{"keyword1", offsetof(Theme, keyword1)},   {"type", offsetof(Theme, keyword2)},
+	{"keyword2", offsetof(Theme, keyword2)},   {"string", offsetof(Theme, string)},
+	{"number", offsetof(Theme, number)},       {"line_number", offsetof(Theme, line_number)},
+	{"status_bg", offsetof(Theme, status_bg)}, {"status_fg", offsetof(Theme, status_fg)},
+	{"border", offsetof(Theme, border)},       {"accent", offsetof(Theme, border)},
+	{"visual_bg", offsetof(Theme, visual_bg)}, {"visual_fg", offsetof(Theme, visual_fg)},
+	{"err", offsetof(Theme, err)},
+};
+#define HK_SLOT_COUNT ((int)(sizeof(HK_SLOTS) / sizeof(HK_SLOTS[0])))
+
+static Color *hkSlot(Theme *t, const char *slot) {
+	for (int i = 0; i < HK_SLOT_COUNT; i++)
+		if (strcmp(slot, HK_SLOTS[i].name) == 0) return (Color *)((char *)t + HK_SLOTS[i].off);
+	return NULL;
+}
+
+/* #rrggbb, #rgb, ansiN (0-15), default, or the old R,G,B. */
+static int hkParseColor(const char *v, Color *out) {
+	Color c = {0, 0, 0, 0};
+	while (*v == ' ') v++;
+	if (v[0] == '#') {
+		unsigned x = 0; int n = 0;
+		for (const char *p = v + 1; isxdigit((unsigned char)*p); p++, n++)
+			x = x * 16 + (unsigned)(isdigit((unsigned char)*p) ? *p - '0' : (tolower((unsigned char)*p) - 'a' + 10));
+		if (n == 6) { c.r = (x >> 16) & 255; c.g = (x >> 8) & 255; c.b = x & 255; }
+		else if (n == 3) { c.r = ((x >> 8) & 15) * 17; c.g = ((x >> 4) & 15) * 17; c.b = (x & 15) * 17; }
+		else return 0;
+	} else if (strncmp(v, "ansi", 4) == 0 && isdigit((unsigned char)v[4])) {
+		int n = atoi(v + 4);
+		if (n < 0 || n > 15) return 0;
+		c.r = HK_COL_ANSI; c.g = n;
+	} else if (strncmp(v, "default", 7) == 0) {
+		c.r = HK_COL_DEFAULT;
+	} else if (sscanf(v, "%d,%d,%d", &c.r, &c.g, &c.b) == 3) {
+		if (c.r < 0 || c.r > 255 || c.g < 0 || c.g > 255 || c.b < 0 || c.b > 255) return 0;
+	} else {
+		return 0;
+	}
+	*out = c;
+	return 1;
+}
+
+/* A custom theme: theme.<name>.<slot>=<color>, theme.<name>.base=<preset>. */
+typedef struct {
+	char name[32];
+	char base[32];
+	struct { char slot[16]; Color c; } set[24];
+	int nset;
+} hkCustomTheme;
+static hkCustomTheme *hk_custom;
+static int hk_custom_n;
+
+static hkCustomTheme *hkCustomFind(const char *name, int create) {
+	for (int i = 0; i < hk_custom_n; i++) if (strcmp(hk_custom[i].name, name) == 0) return &hk_custom[i];
+	if (!create || strlen(name) >= sizeof(hk_custom[0].name)) return NULL;
+	hkCustomTheme *n = realloc(hk_custom, sizeof(*hk_custom) * (hk_custom_n + 1));
+	if (!n) return NULL;
+	hk_custom = n;
+	memset(&hk_custom[hk_custom_n], 0, sizeof(*hk_custom));
+	snprintf(hk_custom[hk_custom_n].name, sizeof(hk_custom[0].name), "%s", name);
+	return &hk_custom[hk_custom_n++];
+}
+
+static int hkIsLight(Color c) {
+	return c.r >= 0 && (c.r * 299 + c.g * 587 + c.b * 114) / 1000 > 128;
+}
+
+static int hkThemeLookup(const char *name, Theme *out, int depth) {
+	if (!name || depth > 4) return 0;
+	if (strcmp(name, "terminal") == 0) { *out = HK_THEME_TERMINAL; return 1; }
+	for (int i = 0; i < (int)(sizeof(HK_THEMES) / sizeof(HK_THEMES[0])); i++) {
 		if (strcmp(name, HK_THEMES[i].name) != 0) continue;
-		E.theme = HK_THEMES[i].t;
-		snprintf(E.theme_name, sizeof(E.theme_name), "%s", name);
-		gridInvalidateFront();
-		E.full_redraw_pending = 1;
+		static const size_t order[12] = {
+			offsetof(Theme, bg), offsetof(Theme, fg), offsetof(Theme, comment), offsetof(Theme, keyword1),
+			offsetof(Theme, keyword2), offsetof(Theme, string), offsetof(Theme, line_number),
+			offsetof(Theme, status_bg), offsetof(Theme, status_fg), offsetof(Theme, border),
+			offsetof(Theme, visual_bg), offsetof(Theme, visual_fg),
+		};
+		for (int k = 0; k < 12; k++)
+			*(Color *)((char *)out + order[k]) =
+				(Color){HK_THEMES[i].c[k][0], HK_THEMES[i].c[k][1], HK_THEMES[i].c[k][2], 0};
+		out->number = out->string;
+		out->err = hkIsLight(out->bg) ? (Color){180, 35, 30, 0} : (Color){235, 95, 80, 0};
+		return 1;
+	}
+	hkCustomTheme *ct = hkCustomFind(name, 0);
+	if (!ct) return 0;
+	if (!hkThemeLookup(ct->base[0] ? ct->base : "terminal", out, depth + 1)) *out = HK_THEME_TERMINAL;
+	int has_number = 0, has_string = 0;
+	for (int i = 0; i < ct->nset; i++) {
+		Color *slot = hkSlot(out, ct->set[i].slot);
+		if (slot) *slot = ct->set[i].c;
+		if (strcmp(ct->set[i].slot, "number") == 0) has_number = 1;
+		if (strcmp(ct->set[i].slot, "string") == 0) has_string = 1;
+	}
+	if (has_string && !has_number) out->number = out->string;   /* numbers follow strings, as in the presets */
+	return 1;
+}
+
+int editorApplyThemeByName(const char *name) {
+	Theme t;
+	if (!hkThemeLookup(name, &t, 0)) return 0;
+	E.theme = t;
+	snprintf(E.theme_name, sizeof(E.theme_name), "%s", name);
+	return 1;
+}
+
+/* terminal first, then the presets, then the rc's own */
+static int hkThemeNames(const char **out, int max) {
+	int n = 0;
+	if (n < max) out[n++] = "terminal";
+	for (int i = 0; i < (int)(sizeof(HK_THEMES) / sizeof(HK_THEMES[0])) && n < max; i++) out[n++] = HK_THEMES[i].name;
+	for (int i = 0; i < hk_custom_n && n < max; i++) out[n++] = hk_custom[i].name;
+	return n;
+}
+
+void initTheme() {
+	editorApplyThemeByName("terminal");
+}
+
+/* ---- the rc: one file for every tool ----
+   Global: the first of $HAKORC, ~/.hakorc, ${XDG_CONFIG_HOME:-~/.config}/hako/hakorc
+   (writes go there; ~/.hakorc when none exists). Project: ./.hakorc on top. An
+   `edit.` key is hake's and beats the plain one; `code.` and `studio.` are the
+   other tools'. A project rc comes with whatever repo was cloned, so it may not
+   set what runs a command or reaches the network. */
+typedef struct { char *key; char *val; int prio; } hkRcEnt;
+static hkRcEnt *hk_rc;
+static int hk_rc_n;
+
+static void hkRcPut(const char *key, const char *val, int prio) {
+	for (int i = 0; i < hk_rc_n; i++) {
+		if (strcmp(hk_rc[i].key, key) != 0) continue;
+		if (prio < hk_rc[i].prio) return;
+		free(hk_rc[i].val);
+		hk_rc[i].val = strdup(val);
+		hk_rc[i].prio = prio;
+		return;
+	}
+	hkRcEnt *n = realloc(hk_rc, sizeof(*hk_rc) * (hk_rc_n + 1));
+	if (!n) return;
+	hk_rc = n;
+	hk_rc[hk_rc_n].key = strdup(key);
+	hk_rc[hk_rc_n].val = strdup(val);
+	hk_rc[hk_rc_n].prio = prio;
+	hk_rc_n++;
+}
+
+static void hkRcFree(void) {
+	for (int i = 0; i < hk_rc_n; i++) { free(hk_rc[i].key); free(hk_rc[i].val); }
+	free(hk_rc);
+	hk_rc = NULL;
+	hk_rc_n = 0;
+}
+
+static int hkRcProjectDenied(const char *key) {
+	static const char *const deny[] = {"ai_api_key", "ai_endpoint", "ai_auto_approve", "editor",
+	                                   "voice_cmd", "console_sandbox", NULL};
+	for (int i = 0; deny[i]; i++) if (strcmp(key, deny[i]) == 0) return 1;
+	size_t n = strlen(key);
+	if (n > 4 && strcmp(key + n - 4, "_cmd") == 0 && strcmp(key, "build_cmd") != 0 &&
+	    strcmp(key, "test_cmd") != 0 && strcmp(key, "run_cmd") != 0) return 1;
+	return 0;
+}
+
+/* Splits one rc line. Returns 0 for a comment, a blank or no '='. */
+static int hkRcSplit(char *line, char **key, char **val) {
+	char *s = line;
+	while (*s == ' ' || *s == '\t') s++;
+	if (*s == '#' || *s == '\0' || *s == '\n' || *s == '\r') return 0;
+	char *eq = strchr(s, '=');
+	if (!eq) return 0;
+	char *ke = eq;
+	while (ke > s && (ke[-1] == ' ' || ke[-1] == '\t')) ke--;
+	*ke = '\0';
+	char *v = eq + 1;
+	while (*v == ' ' || *v == '\t') v++;
+	v[strcspn(v, "\r\n")] = '\0';
+	char *ve = v + strlen(v);
+	while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t')) *--ve = '\0';
+	*key = s; *val = v;
+	return *s != '\0';
+}
+
+static void hkRcReadFile(const char *path, int project) {
+	FILE *fp = fopen(path, "r");
+	if (!fp) return;
+	char *line = NULL;
+	size_t cap = 0;
+	int refused = 0;
+	while (getline(&line, &cap, fp) != -1) {
+		char *key, *val;
+		if (!hkRcSplit(line, &key, &val)) continue;
+		int prefixed = 0;
+		if (strncmp(key, "edit.", 5) == 0) { key += 5; prefixed = 1; }
+		else if (strncmp(key, "code.", 5) == 0 || strncmp(key, "studio.", 7) == 0) continue;
+		if (project && hkRcProjectDenied(key)) {
+			if (!refused++)
+				snprintf(E.rc_notice, sizeof(E.rc_notice), "project .hakorc: %.60s ignored (set it in ~/.hakorc)", key);
+			continue;
+		}
+		hkRcPut(key, val, project * 2 + prefixed);
+	}
+	if (refused > 1) {
+		size_t l = strlen(E.rc_notice);
+		snprintf(E.rc_notice + l, sizeof(E.rc_notice) - l, " +%d more", refused - 1);
+	}
+	free(line);
+	fclose(fp);
+}
+
+static const char *hkRcGet(const char *key) {
+	for (int i = 0; i < hk_rc_n; i++) if (strcmp(hk_rc[i].key, key) == 0) return hk_rc[i].val;
+	return NULL;
+}
+
+static int hkKeymodeFromName(const char *v) {
+	if (!v) return -1;
+	if (strcmp(v, "vim") == 0 || strcmp(v, "vi") == 0) return HK_KEYS_VIM;
+	if (strcmp(v, "emacs") == 0) return HK_KEYS_EMACS;
+	if (strcmp(v, "nano") == 0 || strcmp(v, "pico") == 0) return HK_KEYS_NANO;
+	return -1;
+}
+
+static int hkThemeOverride(const char *key, const char *val) {
+	static const char *const map[][2] = {
+		{"theme_bg", "bg"}, {"theme_fg", "fg"}, {"theme_comment", "comment"},
+		{"theme_keyword1", "keyword1"}, {"theme_keyword2", "keyword2"}, {"theme_string", "string"},
+		{"theme_number", "number"}, {"theme_line_number", "line_number"},
+		{"theme_status_bg", "status_bg"}, {"theme_status_fg", "status_fg"}, {"theme_border", "border"},
+		{"theme_visual_bg", "visual_bg"}, {"theme_visual_fg", "visual_fg"},
+	};
+	for (int i = 0; i < (int)(sizeof(map) / sizeof(map[0])); i++) {
+		if (strcmp(key, map[i][0]) != 0) continue;
+		Color c;
+		Color *slot = hkSlot(&E.theme, map[i][1]);
+		if (slot && hkParseColor(val, &c)) *slot = c;
 		return 1;
 	}
 	return 0;
 }
 
-void initTheme() {
-	editorApplyThemeByName("mithraeum");
+/* One key, live. Shared by the rc, :set and :config. Returns 0 for a key hake
+   does not know (every tool tolerates every key). */
+static int hkApplyKey(const char *key, const char *val) {
+	int n = atoi(val);
+	if (strcmp(key, "tab_stop") == 0) { E.tab_stop = n >= 1 && n <= 16 ? n : TAB_STOP; }
+	else if (strcmp(key, "use_tabs") == 0) E.use_tabs = n;
+	else if (strcmp(key, "pane_titles") == 0) E.pane_titles = n;
+	else if (strcmp(key, "word_wrap") == 0) {
+		E.word_wrap = n;
+		if (E.active_pane && E.active_pane->type == PANE_EDITOR) E.active_pane->wrap_lines = n;
+	}
+	else if (strcmp(key, "show_line_numbers") == 0 || strcmp(key, "number") == 0) E.show_line_numbers = n;
+	else if (strcmp(key, "relative_line_numbers") == 0 || strcmp(key, "relative_numbers") == 0) { if (n) E.show_line_numbers = 2; }
+	else if (strcmp(key, "status_line") == 0) E.status_line = n < 0 ? 0 : n > 2 ? 2 : n;
+	else if (strcmp(key, "max_undo_levels") == 0) E.max_undo_levels = n > 0 ? n : 100;
+	else if (strcmp(key, "mouse") == 0 || strcmp(key, "mouse_enabled") == 0) E.mouse_enabled = n;
+	else if (strcmp(key, "auto_indent") == 0) E.auto_indent = n;
+	else if (strcmp(key, "smart_indent") == 0) E.smart_indent = n;
+	else if (strcmp(key, "scroll_speed") == 0) E.scroll_speed = n >= 1 ? n : 3;
+	else if (strcmp(key, "explorer_width") == 0) E.explorer_width = n < 10 ? 25 : n > 60 ? 60 : n;
+	else if (strcmp(key, "explorer_show_hidden") == 0) E.explorer_show_hidden = n;
+	else if (strcmp(key, "console_sandbox") == 0) E.console_sandbox = n;
+	else if (strcmp(key, "build_cmd") == 0) { free(E.build_cmd); E.build_cmd = strdup(val); }
+	else if (strcmp(key, "test_cmd") == 0) { free(E.test_cmd); E.test_cmd = strdup(val); }
+	else if (strcmp(key, "run_cmd") == 0) { free(E.run_cmd); E.run_cmd = strdup(val); }
+	else if (strcmp(key, "keys") == 0) {
+		int m = hkKeymodeFromName(val);
+		if (m >= 0 && !E.keymode_forced) E.keymode = m;
+	}
+	else if (strcmp(key, "theme") == 0) {
+		if (!editorApplyThemeByName(val)) {
+			snprintf(E.rc_notice, sizeof(E.rc_notice), "unknown theme: %.40s (using terminal)", val);
+			editorApplyThemeByName("terminal");
+		}
+	}
+	else if (!hkThemeOverride(key, val)) return 0;
+	return 1;
+}
+
+static void hkRcDefineThemes(void) {
+	for (int i = 0; i < hk_rc_n; i++) {
+		const char *k = hk_rc[i].key;
+		if (strncmp(k, "theme.", 6) != 0) continue;
+		const char *dot = strrchr(k + 6, '.');
+		if (!dot || dot == k + 6) continue;
+		char name[32], slot[16];
+		int nl = (int)(dot - (k + 6));
+		if (nl >= (int)sizeof(name) || strlen(dot + 1) >= sizeof(slot)) continue;
+		memcpy(name, k + 6, nl);
+		name[nl] = '\0';
+		snprintf(slot, sizeof(slot), "%s", dot + 1);
+		hkCustomTheme *ct = hkCustomFind(name, 1);
+		if (!ct) continue;
+		if (strcmp(slot, "base") == 0) { snprintf(ct->base, sizeof(ct->base), "%s", hk_rc[i].val); continue; }
+		Color c;
+		Theme probe;
+		if (!hkSlot(&probe, slot) || !hkParseColor(hk_rc[i].val, &c)) continue;
+		if (ct->nset < (int)(sizeof(ct->set) / sizeof(ct->set[0]))) {
+			snprintf(ct->set[ct->nset].slot, sizeof(ct->set[0].slot), "%s", slot);
+			ct->set[ct->nset].c = c;
+			ct->nset++;
+		}
+	}
+}
+
+static int hkFileExists(const char *p) {
+	struct stat st;
+	return p && stat(p, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+/* The global rc: the file that exists, or where a write would create it. */
+static char *hkGlobalRcPath(int *found) {
+	char buf[PATH_MAX];
+	const char *env = getenv("HAKORC");
+	const char *home = getenv("HOME");
+	*found = 0;
+	if (env && *env && hkFileExists(env)) { *found = 1; return strdup(env); }
+	if (home) {
+		snprintf(buf, sizeof(buf), "%s/.hakorc", home);
+		if (hkFileExists(buf)) { *found = 1; return strdup(buf); }
+		const char *xdg = getenv("XDG_CONFIG_HOME");
+		char xb[PATH_MAX];
+		if (xdg && *xdg) snprintf(xb, sizeof(xb), "%s/hako/hakorc", xdg);
+		else snprintf(xb, sizeof(xb), "%s/.config/hako/hakorc", home);
+		if (hkFileExists(xb)) { *found = 1; return strdup(xb); }
+	}
+	if (env && *env) return strdup(env);
+	if (home) { snprintf(buf, sizeof(buf), "%s/.hakorc", home); return strdup(buf); }
+	return NULL;
+}
+
+static int hkSameFile(const char *a, const char *b) {
+#ifndef _WIN32
+	struct stat sa, sb;
+	return a && b && stat(a, &sa) == 0 && stat(b, &sb) == 0 && sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+#else
+	char ra[PATH_MAX], rb[PATH_MAX];
+	return a && b && _fullpath(ra, a, PATH_MAX) && _fullpath(rb, b, PATH_MAX) && _stricmp(ra, rb) == 0;
+#endif
 }
 
 void editorLoadConfig() {
-	FILE *fp = NULL;
-	char *config_paths[] = {
-		"./.hakorc",
-		NULL,
-		NULL
-	};
-
-	const char *home = getenv("HOME");
-	if (home) {
-		static char homerc[512];
-		snprintf(homerc, sizeof(homerc), "%s/.hakorc", home);
-		config_paths[1] = homerc;
+	int found = 0;
+	free(E.config_path);
+	E.config_path = hkGlobalRcPath(&found);
+	hkRcFree();
+	if (found) {
+		hkRcReadFile(E.config_path, 0);
+#ifndef _WIN32
+		/* children (the agent, a shell) read the same file */
+		if (!getenv("HAKORC")) setenv("HAKORC", E.config_path, 0);
+#endif
+	}
+	if (hkFileExists("./.hakorc") && !(found && hkSameFile("./.hakorc", E.config_path))) {
+		free(E.project_rc);
+		E.project_rc = strdup("./.hakorc");
+		hkRcReadFile("./.hakorc", 1);
 	}
 
-	for (int i = 0; config_paths[i] && !fp; i++) {
-		fp = fopen(config_paths[i], "r");
-		if (fp) E.config_path = strdup(config_paths[i]);
+	hkRcDefineThemes();
+	const char *th = hkRcGet("theme");
+	hkApplyKey("theme", th ? th : "terminal");
+	for (int i = 0; i < hk_rc_n; i++) {
+		const char *k = hk_rc[i].key;
+		if (strcmp(k, "theme") == 0 || strncmp(k, "theme.", 6) == 0) continue;
+		hkApplyKey(k, hk_rc[i].val);
 	}
+}
 
-	if (!fp) { return; }
-
-	char *line = NULL;
-	size_t len = 0;
-	while (getline(&line, &len, fp) != -1) {
-		if (line[0] == '#' || line[0] == '\n') continue;
-
-		char *eq = strchr(line, '=');
-		if (!eq) continue;
-		*eq = '\0';
-		char *key = line;
-		char *val = eq + 1;
-
-		val[strcspn(val, "\r\n")] = 0;
-
-		while (*key == ' ' || *key == '\t') key++;
-		while (*val == ' ' || *val == '\t') val++;
-
-		if (strcmp(key, "tab_stop") == 0) {
-			E.tab_stop = atoi(val);
-			if (E.tab_stop < 1) E.tab_stop = TAB_STOP;
-		} else if (strcmp(key, "use_tabs") == 0) {
-			E.use_tabs = atoi(val);
-		} else if (strcmp(key, "pane_titles") == 0) {
-			E.pane_titles = atoi(val);
-		} else if (strcmp(key, "word_wrap") == 0) {
-			E.word_wrap = atoi(val);
-		} else if (strcmp(key, "show_line_numbers") == 0) {
-			E.show_line_numbers = atoi(val);
-		} else if (strcmp(key, "max_undo_levels") == 0) {
-			E.max_undo_levels = atoi(val);
-		} else if (strcmp(key, "mouse") == 0 || strcmp(key, "mouse_enabled") == 0) {
-			E.mouse_enabled = atoi(val);    /* `mouse` is the shared key; mouse_enabled is the old name */
-		} else if (strcmp(key, "auto_indent") == 0) {
-			E.auto_indent = atoi(val);
-		} else if (strcmp(key, "smart_indent") == 0) {
-			E.smart_indent = atoi(val);
-		} else if (strcmp(key, "scroll_speed") == 0) {
-			E.scroll_speed = atoi(val);
-			if (E.scroll_speed < 1) E.scroll_speed = 3;
-		} else if (strcmp(key, "relative_line_numbers") == 0) {
-			if (atoi(val)) E.show_line_numbers = 2;
-		} else if (strcmp(key, "explorer_width") == 0) {
-			E.explorer_width = atoi(val);
-			if (E.explorer_width < 10) E.explorer_width = 25;
-			if (E.explorer_width > 60) E.explorer_width = 60;
-		} else if (strcmp(key, "explorer_show_hidden") == 0) {
-			E.explorer_show_hidden = atoi(val);
-		} else if (strcmp(key, "build_cmd") == 0) {
-			free(E.build_cmd);
-			E.build_cmd = strdup(val);
-		} else if (strcmp(key, "test_cmd") == 0) {
-			free(E.test_cmd);
-			E.test_cmd = strdup(val);
-		} else if (strcmp(key, "run_cmd") == 0) {
-			free(E.run_cmd);
-			E.run_cmd = strdup(val);
-		} else if (strcmp(key, "theme") == 0) {
-			editorApplyThemeByName(val);
-		} else if (strncmp(key, "ai_", 3) == 0) {
-			(void)val;
-		} else if (strncmp(key, "theme_", 6) == 0) {
-			int r, g, b;
-			if (sscanf(val, "%d,%d,%d", &r, &g, &b) == 3) {
-				Color color = {r, g, b};
-				if (strcmp(key, "theme_bg") == 0) E.theme.bg = color;
-				else if (strcmp(key, "theme_fg") == 0) E.theme.fg = color;
-				else if (strcmp(key, "theme_comment") == 0) E.theme.comment = color;
-				else if (strcmp(key, "theme_keyword1") == 0) E.theme.keyword1 = color;
-				else if (strcmp(key, "theme_keyword2") == 0) E.theme.keyword2 = color;
-				else if (strcmp(key, "theme_string") == 0) E.theme.string = color;
-				else if (strcmp(key, "theme_line_number") == 0) E.theme.line_number = color;
-				else if (strcmp(key, "theme_status_bg") == 0) E.theme.status_bg = color;
-				else if (strcmp(key, "theme_status_fg") == 0) E.theme.status_fg = color;
-				else if (strcmp(key, "theme_visual_bg") == 0) E.theme.visual_bg = color;
-				else if (strcmp(key, "theme_visual_fg") == 0) E.theme.visual_fg = color;
-			}
+/* Set one key in the global rc, in place: the line that holds it is rewritten,
+   every other line and comment is kept; a new key is appended. */
+static int hkRcSet(const char *key, const char *val) {
+	const char *path = E.config_path;
+	if (!path) return 0;
+	char *old = NULL;
+	size_t olen = 0;
+	FILE *fp = fopen(path, "r");
+	if (fp) {
+		char chunk[4096];
+		size_t got;
+		while ((got = fread(chunk, 1, sizeof(chunk), fp)) > 0) {
+			char *n = realloc(old, olen + got + 1);
+			if (!n) { free(old); fclose(fp); return 0; }
+			old = n;
+			memcpy(old + olen, chunk, got);
+			olen += got;
 		}
+		fclose(fp);
+	}
+	size_t cap = olen + strlen(key) + strlen(val) + 8;
+	char *out = malloc(cap);
+	if (!out) { free(old); return 0; }
+	size_t o = 0;
+	int replaced = 0;
+	size_t i = 0;
+	while (i < olen) {
+		size_t e = i;
+		while (e < olen && old[e] != '\n') e++;
+		char *line = malloc(e - i + 1);
+		if (!line) break;
+		memcpy(line, old + i, e - i);
+		line[e - i] = '\0';
+		char *k, *v;
+		int match = hkRcSplit(line, &k, &v) && strcmp(k, key) == 0;
+		free(line);
+		if (match) {
+			size_t need = o + strlen(key) + strlen(val) + 2 + (olen - e) + 8;
+			if (need > cap) {
+				char *n = realloc(out, need);
+				if (!n) break;
+				out = n; cap = need;
+			}
+			o += (size_t)snprintf(out + o, cap - o, "%s=%s", key, val);
+			replaced = 1;
+		} else {
+			memcpy(out + o, old + i, e - i);
+			o += e - i;
+		}
+		if (e < olen) out[o++] = '\n';
+		i = e + 1;
+	}
+	if (!replaced) {
+		if (o > 0 && out[o - 1] != '\n') out[o++] = '\n';
+		o += (size_t)snprintf(out + o, cap - o, "%s=%s\n", key, val);
+	}
+	free(old);
+	int ok = 0;
+	int fd = open(path, O_RDWR | O_CREAT, 0644);
+	if (fd >= 0) {
+		size_t off = 0;
+		while (off < o) {
+			ssize_t w = write(fd, out + off, o - off);
+			if (w < 0 && errno == EINTR) continue;
+			if (w <= 0) break;
+			off += (size_t)w;
+		}
+		ok = (off == o && ftruncate(fd, (off_t)o) == 0);
+		close(fd);
+	}
+	free(out);
+	return ok;
+}
+
+static int hkRcHasKey(const char *key) {
+	FILE *fp = E.config_path ? fopen(E.config_path, "r") : NULL;
+	if (!fp) return 0;
+	char *line = NULL;
+	size_t cap = 0;
+	int has = 0;
+	while (!has && getline(&line, &cap, fp) != -1) {
+		char *k, *v;
+		if (hkRcSplit(line, &k, &v) && strcmp(k, key) == 0) has = 1;
 	}
 	free(line);
 	fclose(fp);
+	return has;
+}
+
+/* A picker writes whichever key decides hake's theme: edit.theme when the rc has
+   one, else the shared theme. */
+static void hkSaveTheme(const char *name) {
+	const char *key = hkRcHasKey("edit.theme") ? "edit.theme" : "theme";
+	if (hkRcSet(key, name)) editorSetStatusMessage("theme: %s (saved to %s)", name, hkBaseName(E.config_path));
+	else editorSetStatusMessage("theme: %s (could not write %s)", name, E.config_path ? E.config_path : "~/.hakorc");
 }
 
 void initEditor() {
@@ -9063,9 +11265,9 @@ void initEditor() {
 	E.use_tabs = 1;
 	E.word_wrap = 1;
 	E.max_undo_levels = 100;
-	E.show_line_numbers = 1;
+	E.show_line_numbers = 0;          /* vim's default; show_line_numbers=1 in the rc */
+	E.status_line = 1;                /* a status bar only with more than one pane */
 	E.pane_titles = 1;
-	E.splash_active = 1;
 	E.full_redraw_pending = 1;
 	E.explorer_width = 25;
 	E.mouse_enabled = 1;
@@ -9074,14 +11276,14 @@ void initEditor() {
 	E.scroll_speed = 3;
 	E.search.wrap_search = 1;
 
-	E.explorer_kanji = strdup("箱");
+	E.project_dir = getcwd(NULL, 0);
 	E.explorer_name = strdup("Kami");
-	E.ai_kanji = strdup("箱");
 	E.ai_name = strdup("Rei");
 
 	initTheme();
 	editorInitAI();
 	editorLoadConfig();
+	if (E.keymode != HK_KEYS_VIM) E.mode = MODE_INSERT;     /* emacs and nano type straight in */
 
 	editorUpdateWindowSize();
 
@@ -9094,20 +11296,31 @@ void initEditor() {
 	}
 }
 
+/* Rows below the panes: the status bar (when shown), the message line, and
+   nano's two rows of shortcuts. A change of layout is not a change of terminal:
+   the grid diff repaints it, no clear. */
 void editorUpdateWindowSize() {
+	static int last_rows = -1, last_cols = -1;
 	int rows, cols;
 	if (getWindowSize(&rows, &cols) == -1) die("getWindowSize");
 	if (rows < 2) rows = 24;
 	if (cols < 1) cols = 80;
 	if (rows > 4096) rows = 4096;
 	if (cols > 4096) cols = 4096;
-	int new_rows = rows - 2;
+	if (rows != last_rows || cols != last_cols) {
+		if (last_rows >= 0) E.full_redraw_pending = 1;
+		last_rows = rows; last_cols = cols;
+	}
+	int nano = E.keymode == HK_KEYS_NANO;
+	E.status_shown = E.status_line == 2 || nano || (E.status_line == 1 && hkPaneCount() > 1);
+	int reserved = 1 + E.status_shown + (nano ? 2 : 0);
+	if (rows - reserved < 3) { E.status_shown = 0; reserved = 1; }
+	int new_rows = rows - reserved;
 	int new_cols = cols;
 	if (new_rows != E.screenrows || new_cols != E.screencols) {
 		E.screenrows = new_rows;
 		E.screencols = new_cols;
 		if (E.root_pane) editorResizePanes();
-		E.full_redraw_pending = 1;
 	}
 	if (E.screencols > 0 && rows > 0) {
 		gridResize(E.screencols, rows);
@@ -9132,31 +11345,105 @@ void editorCleanup() {
 	hkFreeRegisters();
 	free(E.search.query);
 	free(E.config_path);
+	free(E.project_rc);
 	free(E.build_cmd);
 	free(E.test_cmd);
 	free(E.run_cmd);
+	hkRcFree();
+	free(hk_custom);
 
-	free(E.explorer_kanji);
 	free(E.explorer_name);
-	free(E.ai_kanji);
 	free(E.ai_name);
 
 	editorCleanupAI();
 	gridFree();
 }
 
+/* hake --hl-dump file: each line, then one class letter per byte of it (tabs
+   expanded). tools/hl-test.py pins the highlighting with it. */
+static int hkHlDump(const char *path) {
+	static const char cls[] = {
+		[HL_NORMAL] = '.', [HL_COMMENT] = 'c', [HL_MLCOMMENT] = 'c', [HL_KEYWORD1] = 'k', [HL_KEYWORD2] = 't',
+		[HL_STRING] = 's', [HL_NUMBER] = 'n', [HL_MATCH] = '/', [HL_PREPROCESSOR] = 'p', [HL_FUNCTION] = 'f',
+		[HL_TYPE] = 't', [HL_OPERATOR] = 'o', [HL_BRACKET] = 'b', [HL_CONSTANT] = 'n', [HL_BUILTIN] = 'f',
+		[HL_ATTRIBUTE] = 'p', [HL_CHAR] = 's', [HL_ESCAPE] = 'e', [HL_LABEL] = 'L', [HL_HEADING] = 'h',
+		[HL_STRONG] = 'B', [HL_EMPH] = 'I', [HL_STRONGEMPH] = 'X', [HL_STRIKE] = '~', [HL_CODE] = 'x',
+		[HL_LINK] = 'l', [HL_URL] = 'u', [HL_MARKER] = 'm', [HL_QUOTE] = 'q', [HL_DONE] = 'd', [HL_DELIM] = '-',
+		[HL_DIFF_ADD] = '+', [HL_DIFF_DEL] = '!', [HL_VARIABLE] = 'v', [HL_TAG] = 'g', [HL_ATTRNAME] = 'a',
+		[HL_KEY] = 'y',
+	};
+	FILE *fp = fopen(path, "r");
+	if (!fp) { perror(path); return 1; }
+	E.tab_stop = TAB_STOP;
+	char **lines = NULL;
+	int *lens = NULL, n = 0, cap = 0;
+	char *line = NULL;
+	size_t lcap = 0;
+	ssize_t got;
+	while ((got = getline(&line, &lcap, fp)) != -1) {
+		while (got > 0 && (line[got - 1] == '\n' || line[got - 1] == '\r')) got--;
+		if (n == cap) {
+			cap = cap ? cap * 2 : 64;
+			lines = realloc(lines, cap * sizeof(*lines));
+			lens = realloc(lens, cap * sizeof(*lens));
+		}
+		char *r = malloc(got * 8 + 1);
+		int o = 0;
+		for (ssize_t k = 0; k < got; k++) {
+			if (line[k] == '\t') { do r[o++] = ' '; while (o % E.tab_stop); }
+			else r[o++] = line[k];
+		}
+		r[o] = '\0';
+		lines[n] = r;
+		lens[n++] = o;
+	}
+	free(line);
+	fclose(fp);
+	const struct editorSyntax *syn = hkSyntaxForFile(path);
+	if (syn == HL_TEXT && n > 0 && hkSyntaxForShebang(lines[0])) syn = hkSyntaxForShebang(lines[0]);
+	printf("filetype %s\n", syn->filetype);
+	int st = 0;
+	for (int i = 0; i < n; i++) {
+		unsigned char *hl = malloc(lens[i] + 1);
+		st = hkHlLine(syn, lines[i], lens[i], hl, st, i > 0 ? lines[i - 1] : NULL, i > 0 ? lens[i - 1] : 0,
+		              i + 1 < n ? lines[i + 1] : NULL, i + 1 < n ? lens[i + 1] : 0);
+		printf("%s\n", lines[i]);
+		for (int k = 0; k < lens[i]; k++) putchar(hl[k] < sizeof(cls) && cls[hl[k]] ? cls[hl[k]] : '?');
+		putchar('\n');
+		free(hl);
+	}
+	for (int i = 0; i < n; i++) free(lines[i]);
+	free(lines);
+	free(lens);
+	return 0;
+}
 /*** main ***/
 int main(int argc, char *argv[]) {
-	if (argc >= 2) {
-		if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
+	const char *file = NULL, *dump = NULL;
+	int force_keys = -1;
+	for (int i = 1; i < argc; i++) {
+		const char *a = argv[i];
+		if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
 			printf("%s", HAKE_HELP_TEXT);
 			return 0;
 		}
-		if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
+		if (strcmp(a, "-v") == 0 || strcmp(a, "--version") == 0) {
 			printf("hake v%s (build %s %s)\n", HAKE_VERSION, __DATE__, __TIME__);
 			return 0;
 		}
+		if (strcmp(a, "--vim") == 0) force_keys = HK_KEYS_VIM;
+		else if (strcmp(a, "--emacs") == 0) force_keys = HK_KEYS_EMACS;
+		else if (strcmp(a, "--nano") == 0) force_keys = HK_KEYS_NANO;
+		else if (strcmp(a, "--hl-dump") == 0 && i + 1 < argc) dump = argv[++i];
+		else if (strcmp(a, "--") == 0) { if (i + 1 < argc) file = argv[i + 1]; break; }
+		else if (a[0] == '-' && a[1]) {
+			fprintf(stderr, "hake: unknown option %s (try --help)\n", a);
+			return 2;
+		}
+		else if (!file) file = a;
 	}
+	if (dump) return hkHlDump(dump);
+	if (force_keys >= 0) { E.keymode = force_keys; E.keymode_forced = 1; }
 
 	initEditor();
 	detectTerminalType();
@@ -9173,12 +11460,10 @@ int main(int argc, char *argv[]) {
 	signal(SIGPIPE, SIG_IGN);
 #endif
 
-	if (argc >= 2) {
-		E.splash_active = 0;
-		editorOpen(argv[1]);
-	}
+	if (file) editorOpen((char *)file);
+	else E.intro_active = 1;
+	if (E.rc_notice[0]) editorSetStatusMessage("%s", E.rc_notice);
 
-	editorSetStatusMessage("HAKE v%s | :help for commands", HAKE_VERSION);
 	while (1) {
 		editorReloadIfChanged();
 		editorRefreshScreen();

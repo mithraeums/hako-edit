@@ -1,0 +1,4 @@
+[server]
+host = "a#b" # c
+port = 8080
+ok = true

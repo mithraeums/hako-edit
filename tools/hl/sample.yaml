@@ -1,0 +1,8 @@
+---
+name: hake # c
+list:
+  - "quoted"
+  - it's plain
+anchor: &a 12
+ref: *a
+on: yes
