@@ -5,6 +5,10 @@ This project follows semver (`v0.x.y` is pre-1.0; expect breaking changes betwee
 
 ## [Unreleased]
 
+### fixed
+- `install.sh` installed an unverified binary when a release had no `.sha256` sidecar or no sha256 tool was found; it stops now (`VERIFY=0` still skips the check on purpose)
+- macOS release tarballs could carry AppleDouble `._hake` files; the release workflow sets `COPYFILE_DISABLE`
+
 ## [v0.2.0] - 2026-10-29
 
 ### changed: lighter, like vim
