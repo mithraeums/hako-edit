@@ -2,7 +2,7 @@
   <a href="https://mithraeums.github.io">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://mithraeums.github.io/assets/banner-hake-night.png"/>
-      <img src="https://mithraeums.github.io/assets/banner-hake.png" alt="hake — a quiet box around the cursor" width="100%"/>
+      <img src="https://mithraeums.github.io/assets/banner-hake.png" alt="hake: a quiet box around the cursor" width="100%"/>
     </picture>
   </a>
 </p>
@@ -12,11 +12,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.2.0-e2402e?style=flat-square&labelColor=14130f" alt="v0.2.0"/></a>
-  <img src="https://img.shields.io/badge/license-GPL--3.0-2636c4?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
-  <img src="https://img.shields.io/badge/C99-single%20file-2636c4?style=flat-square&labelColor=14130f" alt="C99 single file"/>
-  <img src="https://img.shields.io/badge/themes-19-2636c4?style=flat-square&labelColor=14130f" alt="19 themes"/>
-  <img src="https://img.shields.io/badge/languages-40%2B-2636c4?style=flat-square&labelColor=14130f" alt="40+ languages"/>
+  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.2.0-ece7da?style=flat-square&labelColor=14130f" alt="v0.2.0"/></a>
+  <img src="https://img.shields.io/badge/license-GPL--3.0-ece7da?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
+  <img src="https://img.shields.io/badge/C99-single%20file-ece7da?style=flat-square&labelColor=14130f" alt="C99 single file"/>
+  <img src="https://img.shields.io/badge/themes-19-ece7da?style=flat-square&labelColor=14130f" alt="19 themes"/>
+  <img src="https://img.shields.io/badge/languages-40%2B-ece7da?style=flat-square&labelColor=14130f" alt="40+ languages"/>
 </p>
 
 <p align="center">
@@ -58,7 +58,7 @@
 - **Multi-Pane Support**: Split horizontally and vertically, resize with `Ctrl-W +/-/</>`, jump with `Ctrl-W 1-9`; with more than one pane each gets a title bar (`pane_titles=0` turns it off)
 - **File Explorer**: 箱 Kami - directory navigation, hidden-file toggle, dirs-first sort
 - **AI Assistant**: 箱 Rei - [hako-code](https://github.com/mithraeums/hako-code) in a split pane, over its `--pipe` protocol. Local hako models (`hako-sho` 3B / `hako-koi` 7B) or any of its 14 cloud providers; its tools, approvals, pickers and sessions, rendered by the editor. A file Rei edits reloads in its pane
-- **Skills**: the agent's [Agent Skills](https://agentskills.io) — `:skill install owner/repo` from the Rei pane
+- **Skills**: the agent's [Agent Skills](https://agentskills.io): `:skill install owner/repo` from the Rei pane
 - **Syntax Highlighting**: 45 file types; markdown done properly (headings, emphasis, code spans and fenced blocks in their own language, lists and task boxes, links, quotes, tables, front matter); multi-line strings and comments, escapes and numbers in every language
 - **Undo/Redo**: time-bounded undo blocks, configurable depth
 - **Visual Selection**: character and line modes with yank/delete/change, count feedback
@@ -247,8 +247,8 @@ refuses rather than running unsandboxed.
 ### Runner (bottom pane)
 
 `:build`, `:test`, `:run <cmd>` stream a command's output into a bottom pane while you
-keep editing. Lines that look like `file:line[:col]` are highlighted and jumpable —
-the compile/fix loop without leaving the editor.
+keep editing. Lines that look like `file:line[:col]` are highlighted and jumpable,
+so the compile/fix loop never leaves the editor.
 
 |Key        |Action                                  |
 |-----------|----------------------------------------|
@@ -274,7 +274,7 @@ the compile/fix loop without leaving the editor.
 |`Ctrl-C`   |Close panel                         |
 |`:q`       |Close panel                         |
 
-### Pane commands (editor-owned — the `:` line, not sent to the agent)
+### Pane commands (editor-owned: the `:` line, not sent to the agent)
 
 |Command           |Action                                                        |
 |------------------|--------------------------------------------------------------|
@@ -283,10 +283,10 @@ the compile/fix loop without leaving the editor.
 |`:update-agent`   |Self-update the agent (`hako --update`) and relaunch it        |
 |`:clear`          |Wipe visible history · `:w` saves the chat to `ai_chat.txt`   |
 
-When the agent asks to write a file or run a command, the pane prompts inline —
+When the agent asks to write a file or run a command, the pane prompts inline:
 `● write_file  foo.c` then `[y] once  [n] no  [a] always`. `:auto` skips the prompts.
 
-### Agent commands (inside the prompt — forwarded to hako)
+### Agent commands (inside the prompt, forwarded to hako)
 
 Anything starting with `:` or `/` that the pane does not own goes to the agent as a
 command, not to the model: `:model`, `:provider`, `:sessions`, `:theme`, `:login`,
@@ -294,7 +294,7 @@ command, not to the model: `:model`, `:provider`, `:sessions`, `:theme`, `:login
 `:sessions` open the editor's own picker; enter picks, esc cancels. The full list is in
 the [hako-code README](https://github.com/mithraeums/hako-code#commands-inside-prompt).
 
-**Tools** (once the project is trusted with `:trust`): the agent's — `read_file`, `list_dir`, `grep`, `glob`, `write_file`, `edit_file`, `edit_lines`, `run_shell`, `web_fetch` — each behind the `[y]/[n]/[a]` prompt above, with the output shown in the pane.
+**Tools** (once the project is trusted with `:trust`): the agent's (`read_file`, `list_dir`, `grep`, `glob`, `write_file`, `edit_file`, `edit_lines`, `run_shell`, `web_fetch`), each behind the `[y]/[n]/[a]` prompt above, with the output shown in the pane.
 
 **Pane control** (any focused pane): `:q rei` / `:q kami` (also `:close <name>`) closes the named side panel.
 
@@ -351,7 +351,7 @@ hake colors 45 file types (`hake --hl-dump <file>` shows what it sees):
 
 ## Change Log
 
-### Latest — v0.2.0
+### Latest: v0.2.0
 - **Lighter, like vim.** No splash: with no file you get vim's start screen. One window has no status bar, title bar or line numbers, just a ruler on the last line; they come back with a second pane (or `status_line=`).
 - **Emacs and nano keys.** `hake --emacs` or `hake --nano` for a run, `edit.keys=` in the rc for good. The panes and every `:` command work in all three.
 - **`:console`.** A shell line under the runner, in the project dir; `console_sandbox=1` runs it with no network, writing only to the project and `$TMPDIR`.
@@ -373,7 +373,7 @@ If you share the belief that simplicity empowers creativity, feel free to contri
 
 Please ensure your code follows the existing style. I realize the single file is a personal choice, though if you choose to assist, I have divided the code.<br>
 
-The file is divided into sections marked `/*** name ***/` — includes, defines, structs,
+The file is divided into sections marked `/*** name ***/`: includes, defines, structs,
 syntax, terminal, the cell grid, panes, rows, cursor, undo, search, file i/o, drawing, input,
 key modes, popups, explorer, runner, the AI pane, the agent pipe client, init, main. `grep -n '^/\*\*\*' hake.c`
 lists them with line numbers.
