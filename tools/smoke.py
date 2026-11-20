@@ -144,6 +144,24 @@ def main():
     r.keys(":help\r"); r.pump(0.5)
     check(r.wait_for("Help: commands & keys", 3), ":help with Rei focused opens the editor's help (it used to vanish)", r)
     r.keys("\x1b"); r.pump(0.3)
+    # :login over the pane: hako asks with input_request. The pane had no answer, so
+    # the key went into the transcript as a chat line and the login waited forever
+    r.keys("i:login openai\r"); r.pump(0.5)
+    check(r.wait_for("paste API key", 4), "hako's ask for a key shows in the pane", r)
+    r.keys("sk-FAKE-rei"); r.pump(0.3)
+    check("***********" in r.text() and "sk-FAKE-rei" not in r.text(), "the key is drawn as * while it is typed", r)
+    r.keys("\r"); r.pump(0.3)
+    check(r.wait_for("ANSWER_OK", 4), "enter sends it back as the answer", r)
+    check("sk-FAKE-rei" not in r.text() and "(hidden)" in r.text(), "and the transcript never shows it", r)
+    # typed while a turn runs: enter queues it (it was dropped, "Waiting for response..."),
+    # ctrl-t puts a line into the turn, and the queue goes when the turn ends
+    r.keys("iLONGTURN go\x1b"); r.keys("\r"); r.pump(0.3)
+    r.keys("iQUEUED_LINE please\x1b"); r.keys("\r"); r.pump(0.3)
+    check(r.wait_for("queued for", 3) and "EARLY" not in r.text(), "enter mid-turn queues the line, sends nothing yet", r)
+    r.keys("isteer this way\x14"); r.pump(0.3)
+    check(r.wait_for("LONG_DONE", 4) and "steer this way" in r.text(), "ctrl-t mid-turn steers the running turn", r)
+    check(r.wait_for("QUEUED_SENT", 4), "and the queued line goes when the turn ends", r)
+    r.keys("\x1b"); r.pump(0.2)
     r.cmd("rei"); r.pump(0.3)
 
     print("5  quit")

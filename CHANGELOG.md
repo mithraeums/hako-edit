@@ -3,9 +3,14 @@
 All notable changes to hako-edit (binary: `hake`). Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows semver (`v0.x.y` is pre-1.0; expect breaking changes between minor versions).
 
-## [Unreleased]
+## [v0.2.1] - 2026-11-19
+
+### added
+- steering in the Rei pane: ctrl-t while a turn runs puts the line into that turn (hako reads it after the tool it is running and says it back where the model read it); in nano keys ctrl-t is still the command line when no turn runs
 
 ### fixed
+- a line sent while a turn ran was dropped ("Waiting for response..."); it is queued and goes when the turn ends, several as one
+- the Rei pane answers hako's `input_request`: `:login <provider>` shows hako's ask, the key is drawn as `*` while typed, enter sends it, and the transcript says `(hidden)`. the key used to land in the transcript as a chat line while the login waited forever
 - `install.sh` installed an unverified binary when a release had no `.sha256` sidecar or no sha256 tool was found; it stops now (`VERIFY=0` still skips the check on purpose)
 - macOS release tarballs could carry AppleDouble `._hake` files; the release workflow sets `COPYFILE_DISABLE`
 

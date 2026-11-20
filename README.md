@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.2.0-ece7da?style=flat-square&labelColor=14130f" alt="v0.2.0"/></a>
+  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.2.1-ece7da?style=flat-square&labelColor=14130f" alt="v0.2.1"/></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-ece7da?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/C99-single%20file-ece7da?style=flat-square&labelColor=14130f" alt="C99 single file"/>
   <img src="https://img.shields.io/badge/themes-19-ece7da?style=flat-square&labelColor=14130f" alt="19 themes"/>
@@ -265,7 +265,8 @@ so the compile/fix loop never leaves the editor.
 |-----------|------------------------------------|
 |`:ai`      |Toggle AI panel                     |
 |`i`        |Enter prompt mode                   |
-|`Enter`    |In INSERT: newline. In NORMAL: send |
+|`Enter`    |In INSERT: newline. In NORMAL: send; while a turn runs, it waits for the turn to end|
+|`Ctrl-T`   |While a turn runs: put the line into it, read after its current step|
 |`:` `/`    |hako's commands, as a menu; `up`/`down` pick, `tab` completes, `enter` runs, `esc` closes it|
 |`Esc`      |Back to NORMAL                      |
 |`v`        |Visual select (copy-only in history)|
@@ -351,13 +352,10 @@ hake colors 45 file types (`hake --hl-dump <file>` shows what it sees):
 
 ## Change Log
 
-### Latest: v0.2.0
-- **Lighter, like vim.** No splash: with no file you get vim's start screen. One window has no status bar, title bar or line numbers, just a ruler on the last line; they come back with a second pane (or `status_line=`).
-- **Emacs and nano keys.** `hake --emacs` or `hake --nano` for a run, `edit.keys=` in the rc for good. The panes and every `:` command work in all three.
-- **`:console`.** A shell line under the runner, in the project dir; `console_sandbox=1` runs it with no network, writing only to the project and `$TMPDIR`.
-- **One rc, layered.** The same file as hako and the studio, with a project `.hakorc` on top. `terminal` is the default theme, custom themes come from the rc, and `:theme` saves the pick there.
-- **A new highlighter that reads tokens.** Multi-line strings, nested comments, escapes and numbers done right, and full markdown with fenced code in its own language.
-- **The Rei pane looks like hako** and has hako's command menu on `:` and `/`.
+### Latest: v0.2.1
+- **Talk to Rei while it works.** A line sent mid-turn used to be dropped; it waits for the turn to end now, and `Ctrl-T` puts it into the running turn instead. In nano keys `^T` is still the `:` line when no turn runs.
+- **`:login` from the Rei pane.** hako's ask shows in the pane, the key is drawn as `*` and the transcript says `(hidden)`.
+- `install.sh` stops on a release it cannot verify.
 
 Earlier versions, and the full detail → [CHANGELOG.md](./CHANGELOG.md).
 
