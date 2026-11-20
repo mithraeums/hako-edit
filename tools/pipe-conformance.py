@@ -15,7 +15,7 @@ from hako-code/tools/tty/fakehakm.py via $HAKO_HAKM.
 
 Exits non-zero on the first broken expectation.
 """
-import json, os, shutil, subprocess, sys, time
+import json, os, queue, shutil, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDIT = os.path.dirname(HERE)
@@ -52,25 +52,34 @@ def main():
     if not os.path.exists(HAKO):
         print("missing hako binary:", HAKO, "(build hako-code first)"); return 2
     setup()
-    env = dict(os.environ, HOME=HOME, HAKO_HAKM=FAKE, TERM="dumb")
+    # SSH_CONNECTION: :login below must not open a browser
+    flog = os.path.join(HOME, "fake.log")      # what the model was given
+    env = dict(os.environ, HOME=HOME, HAKO_HAKM=FAKE, FAKE_LOG=flog, TERM="dumb", SSH_CONNECTION="127.0.0.1 1 127.0.0.1 2")
+    env.pop("OPENAI_API_KEY", None)
     p = subprocess.Popen([HAKO, "--pipe"], cwd=PROJ, env=env,
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.DEVNULL, text=True, bufsize=1)
 
-    seen = []
+    seen, raw = [], []
     def send(obj):
         p.stdin.write(json.dumps(obj) + "\n"); p.stdin.flush()
+
+    # a reader thread, so a quiet agent times out instead of blocking readline forever
+    lines = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(l) for l in iter(p.stdout.readline, "")] + [lines.put(None)],
+                     daemon=True).start()
 
     def pump(pred, secs=25):
         """Read events until pred(event) is true; returns it or None."""
         end = time.time() + secs
         while time.time() < end:
-            line = p.stdout.readline()
-            if not line: return None
+            try: line = lines.get(timeout=max(0.05, end - time.time()))
+            except queue.Empty: return None
+            if line is None: return None
             line = line.strip()
             if not line: continue
             try: ev = json.loads(line)
-            except Exception: continue
+            except Exception: raw.append(line); continue
             seen.append(ev)
             if pred(ev): return ev
         return None
@@ -100,6 +109,11 @@ def main():
         for f in ("kind", "subject"):
             check(f in req, "tool_request carries %s, which the pane renders" % f)
 
+        # 3b. said while the approval waits: a steer goes into this turn after the tool,
+        # a prompt waits for the next (the approval loop used to drop both)
+        send({"type": "steer", "text": "STEERED in pipe"})
+        send({"type": "prompt", "text": "AFTER the turn"})
+
         # 4. answer it the way hake does
         send({"type": "approve", "id": req["id"], "answer": "y"})
 
@@ -109,6 +123,17 @@ def main():
 
     done = pump(lambda e: e.get("type") in ("done", "message", "ai"), 25)
     check(done is not None, "the turn completes after the tool")
+    dones = lambda: sum(1 for e in seen if e.get("type") == "done")
+    said = lambda t: os.path.exists(flog) and ("[user] %s\n" % t) in open(flog).read()
+    pump(lambda e: e.get("type") == "done" and said("AFTER the turn"), 25)
+    fl = open(flog).read() if os.path.exists(flog) else ""
+    check("(sent while you were working) STEERED in pipe" in fl, "a steer said mid-turn reaches the model in that turn")
+    check(any(e.get("type") == "message" and e.get("role") == "user" and e.get("text") == "STEERED in pipe" for e in seen),
+          "and the pane hears it said, where the turn read it")
+    check(said("AFTER the turn"), "a prompt sent while the approval waited runs next, not lost")
+    send({"type": "steer", "text": "IDLE steer"})
+    pump(lambda e: e.get("type") == "done" and said("IDLE steer"), 25)
+    check(said("IDLE steer"), "a steer with no turn running is a prompt")
 
     # 5. a picker over the pipe: :provider must emit a choice_request the pane can
     # render, and an answer must resolve it (this is how :model/:provider/:sessions
@@ -124,6 +149,21 @@ def main():
         send({"type": "choice", "id": cr["id"], "answer": "1"})
         settled = pump(lambda e: e.get("type") in ("done", "message", "system"), 20)
         check(settled is not None, "answering a choice_request resolves the command")
+
+    # 6. a pasted key (:login in the pane): hako asks with input_request and takes the
+    # answer. It printed a raw prompt onto the wire and took the next JSON line as the key
+    send({"type": "slash", "cmd": ":login openai"})
+    ir = pump(lambda e: e.get("type") == "input_request", 20)
+    check(ir is not None, ":login asks for the key with input_request")
+    if ir:
+        check(ir.get("hidden") == 1 and "API key" in ir.get("prompt", ""), "the ask names what to paste and says it is hidden")
+        send({"type": "answer", "answer": "sk-FAKE-conformance"})
+        saved = pump(lambda e: e.get("type") == "message" and "key saved" in e.get("text", ""), 20)
+        check(saved is not None, "the answer is taken as the key")
+        st = pump(lambda e: e.get("type") == "state", 10)
+        check(st is not None and st.get("provider") == "openai", "and the provider moves to openai")
+    pump(lambda e: e.get("type") == "done", 10)
+    check(not raw, "every line on the wire is JSON (%s)" % (raw[:2] or "none other"))
 
     send({"type": "quit"})
     try: p.wait(timeout=10)

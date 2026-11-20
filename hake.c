@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 				
 /*** includes ***/
-#define HAKE_VERSION "0.2.0"
+#define HAKE_VERSION "0.2.1"
 
 /* POSIX + BSD names (popen, strdup, getline, st_mtim ...) under a strict -std=c99 */
 #if !defined(_WIN32)
@@ -384,6 +384,9 @@ typedef struct aiData {
 	char perm_subject[1024];
 	int cmd_sel;               /* the command menu over the input */
 	int cmd_hide;              /* esc closed it for this line */
+	int input_pending;         /* hako asked for a value (input_request): the next line answers it */
+	int input_hidden;          /* and it is a secret: drawn as *, never in the transcript */
+	char *queued;              /* typed while a turn runs: sent as one prompt when it ends */
 } aiData;
 
 /* hako's command table, from its init (or a later state) message */
@@ -680,6 +683,7 @@ static int hakoLaunch(aiData *data);
 static void hakoShutdown(void);
 #define HAKE_TOOL_RESULT_LINES 10   /* tool output rows shown in the Rei pane */
 static void hakoSendLine(const char *json);
+static void hakoJsonEsc(const char *src, char *dst, int dsz);
 static void hakoInstallOrUpdate(aiData *data, int update);
 static void hakoHandleEvent(aiData *data, const char *line);
 static void *hakoReaderThread(void *arg);
@@ -6686,7 +6690,7 @@ static int hkModelessGlobal(int c) {
 	static int cx = 0;
 	editorPane *p = E.active_pane;
 	if (E.keymode == HK_KEYS_NANO) {
-		if (c == CTRL_KEY('t')) { editorColonCommand(); return 1; }
+		if (c == CTRL_KEY('t') && !(p && p->ai && p->ai->streaming)) { editorColonCommand(); return 1; }   /* mid-turn in Rei: a steer */
 		return 0;
 	}
 	if (!cx) {
@@ -9228,6 +9232,21 @@ static void aiPromptInsert(aiData *data, char c) {
 }
 
 static int aiSubmitPrompt(aiData *data) {
+	if (data && data->input_pending) {      /* the pasted key for :login, and the like */
+		char esc[4096], json[4160];
+		hakoJsonEsc(data->prompt_buffer, esc, sizeof(esc));
+		snprintf(json, sizeof(json), "{\"type\":\"answer\",\"answer\":\"%s\"}", esc);
+		if (data->prompt_len) aiAddHistoryRole(data, data->input_hidden ? "(hidden)" : data->prompt_buffer, HK_ROLE_USER);
+		hakoSendLine(json);
+		memset(esc, 0, sizeof(esc));
+		memset(json, 0, sizeof(json));
+		memset(data->prompt_buffer, 0, data->prompt_len);
+		data->prompt_len = data->prompt_cursor = 0;
+		data->input_pending = data->input_hidden = 0;
+		data->mode = MODE_NORMAL;
+		editorSetStatusMessage("-- AI NORMAL --");
+		return 1;
+	}
 	if (!data || data->prompt_len == 0) return 0;
 	/* hako takes `:cmd` (vim habit) as well as `/cmd`. The pane only knew
 	   `/`, so `:models` or `:help` typed here went to the MODEL as chat, and a
@@ -9241,6 +9260,20 @@ static int aiSubmitPrompt(aiData *data) {
 		editorSetStatusMessage("-- AI NORMAL --");
 		return r;
 	}
+	if (data->streaming) {                  /* it was dropped ("Waiting for response..."): kept for the turn's end */
+		size_t ql = data->queued ? strlen(data->queued) : 0, n = ql + (size_t)data->prompt_len + 3;
+		char *q = realloc(data->queued, n);
+		if (q) {
+			snprintf(q + ql, n - ql, "%s%s", ql ? "\n\n" : "", data->prompt_buffer);
+			data->queued = q;
+			aiAddHistory(data, ql ? "queued with the line before it" : "queued for when this turn ends; ctrl-t instead puts a line into this turn");
+		}
+		data->prompt_buffer[0] = '\0';
+		data->prompt_len = data->prompt_cursor = 0;
+		data->mode = MODE_NORMAL;
+		editorSetStatusMessage("-- AI NORMAL --");
+		return 1;
+	}
 	aiAddHistoryRole(data, data->prompt_buffer, HK_ROLE_USER);
 	free(data->current_prompt);
 	data->current_prompt = strdup(data->prompt_buffer);
@@ -9249,11 +9282,20 @@ static int aiSubmitPrompt(aiData *data) {
 	data->prompt_cursor = 0;
 	data->mode = MODE_NORMAL;
 	editorSetStatusMessage("-- AI NORMAL --");
-	if (data->streaming) {
-		aiAddHistory(data, "Waiting for response...");
-		return 1;
-	}
 	return 3;
+}
+
+/* ctrl-t while a turn runs: the line into that turn; hako reads it after the tool it is
+   running and says it back (a user message) where the model read it. */
+static void aiSteer(aiData *data) {
+	if (!data->prompt_len || data->prompt_buffer[0] == ':' || data->prompt_buffer[0] == '/') return;
+	char esc[8192], json[8256];
+	hakoJsonEsc(data->prompt_buffer, esc, sizeof(esc));
+	snprintf(json, sizeof(json), "{\"type\":\"steer\",\"text\":\"%s\"}", esc);
+	hakoSendLine(json);
+	aiAddHistory(data, "into this turn, read after its current step");
+	data->prompt_buffer[0] = '\0';
+	data->prompt_len = data->prompt_cursor = 0;
 }
 
 void aiHandleKey(editorPane *pane, int key) {
@@ -9401,7 +9443,12 @@ void aiHandleKey(editorPane *pane, int key) {
 
 		case '\r':
 		case '\n':
+			if (data->input_pending) { aiSubmitPrompt(data); break; }   /* one line, enter sends it */
 			aiPromptInsert(data, '\n');
+			break;
+
+		case CTRL_KEY('t'):
+			if (data->streaming && !data->input_pending) aiSteer(data);
 			break;
 
 		default:
@@ -9531,7 +9578,7 @@ void aiHandleKey(editorPane *pane, int key) {
 
 		case '\r':
 		case '\n':
-			if (data->prompt_len > 0) {
+			if (data->prompt_len > 0 || data->input_pending) {
 				int r = aiSubmitPrompt(data);
 				if (r == 2) {
 					pthread_mutex_unlock(&data->lock);
@@ -9840,7 +9887,7 @@ void aiRender(editorPane *pane, struct abuf *ab) {
 		}
 	}
 	int spinner_row = -1;
-	if (data->streaming) {
+	if (data->streaming && !data->input_pending) {
 		if (total_vis >= owner_cap) {
 			owner_cap = owner_cap ? owner_cap * 2 : 64;
 			line_owner = realloc(line_owner, sizeof(int) * owner_cap);
@@ -9913,6 +9960,7 @@ void aiRender(editorPane *pane, struct abuf *ab) {
 						char tmp[1024];
 						if (len > (int)sizeof(tmp) - 1) len = (int)sizeof(tmp) - 1;
 						memcpy(tmp, data->prompt_buffer + pstart[vline], len);
+						if (data->input_hidden) memset(tmp, '*', len);
 						tmp[len] = '\0';
 						shown = gridPutStr(cx, gy, tmp, pw, E.theme.fg, E.theme.bg);
 					}
@@ -10317,15 +10365,40 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 
 		pthread_mutex_lock(&data->lock);
 		data->streaming = 0;
+		data->input_pending = data->input_hidden = 0;
+		char *q = data->queued;                 /* what was typed during it goes now, as one prompt */
+		data->queued = NULL;
+		if (q) {
+			aiAddHistoryRole(data, q, HK_ROLE_USER);
+			free(data->current_prompt);
+			data->current_prompt = q;
+		}
 		pthread_mutex_unlock(&data->lock);
+		if (q) aiWorkerSend(data);
 
 	} else if (strcmp(type, "error") == 0) {
 		char *msg = hkExtractJsonString(line, "message");
 		pthread_mutex_lock(&data->lock);
 		aiAddHistory(data, msg ? msg : "Error: unknown");
 		data->streaming = 0;
+		data->input_pending = data->input_hidden = 0;
 		pthread_mutex_unlock(&data->lock);
 		free(msg);
+
+	} else if (strcmp(type, "input_request") == 0) {
+		/* hako needs a value typed (the pasted key for :login): show its ask and
+		   send the next line back as the answer. The pane had no answer, so the
+		   key sat in the transcript and the login waited forever */
+		char *q  = hkExtractJsonString(line, "prompt");
+		char *qd = q ? hkJsonUnescapeDup(q) : NULL;
+		pthread_mutex_lock(&data->lock);
+		aiAddHistory(data, qd ? qd : q ? q : "type it, then enter");
+		data->input_pending = 1;
+		data->input_hidden  = hkExtractJsonInt(line, "hidden") != 0;
+		data->mode = MODE_INSERT;
+		pthread_mutex_unlock(&data->lock);
+		free(qd);
+		free(q);
 
 	} else if (strcmp(type, "choice_request") == 0) {
 		/* :model / :provider / :sessions in the pane. hako cannot draw a tty
