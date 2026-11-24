@@ -3,7 +3,7 @@
 All notable changes to hako-edit (binary: `hake`). Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows semver (`v0.x.y` is pre-1.0; expect breaking changes between minor versions).
 
-## [Unreleased]
+## [v0.2.2] - 2026-11-24
 
 ### added
 - the plan's usage in the Rei pane's header (`5h 31%`), right-aligned, when hako's bar shows it (`:usage bar`, or `usage_bar=1`); it follows each reply with no flash of the status line

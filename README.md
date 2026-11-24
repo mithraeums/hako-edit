@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.2.1-ece7da?style=flat-square&labelColor=14130f" alt="v0.2.1"/></a>
+  <a href="https://github.com/mithraeums/hako-edit/releases"><img src="https://img.shields.io/badge/version-v0.2.2-ece7da?style=flat-square&labelColor=14130f" alt="v0.2.1"/></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-ece7da?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/C99-single%20file-ece7da?style=flat-square&labelColor=14130f" alt="C99 single file"/>
   <img src="https://img.shields.io/badge/themes-19-ece7da?style=flat-square&labelColor=14130f" alt="19 themes"/>
@@ -352,10 +352,9 @@ hake colors 45 file types (`hake --hl-dump <file>` shows what it sees):
 
 ## Change Log
 
-### Latest: v0.2.1
-- **Talk to Rei while it works.** A line sent mid-turn used to be dropped; it waits for the turn to end now, and `Ctrl-T` puts it into the running turn instead. In nano keys `^T` is still the `:` line when no turn runs.
-- **`:login` from the Rei pane.** hako's ask shows in the pane, the key is drawn as `*` and the transcript says `(hidden)`.
-- `install.sh` stops on a release it cannot verify.
+### Latest: v0.2.2
+- **The plan's usage in Rei's header.** `5h 31%` at the right when hako's bar shows it (`:usage bar`), following each reply.
+- The cursor shows from the start in iSh.
 
 Earlier versions, and the full detail → [CHANGELOG.md](./CHANGELOG.md).
 

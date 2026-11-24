@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 				
 /*** includes ***/
-#define HAKE_VERSION "0.2.1"
+#define HAKE_VERSION "0.2.2"
 
 /* POSIX + BSD names (popen, strdup, getline, st_mtim ...) under a strict -std=c99 */
 #if !defined(_WIN32)
