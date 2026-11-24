@@ -38,6 +38,15 @@ for line in iter(sys.stdin.readline, ""):
         emit({"type": "message", "role": "ai", "text": "LONG_DONE"})
         emit({"type": "done", "turn": 1})
         continue
+    # the plan's usage after a call: Rei's header shows it when hako's bar does (bar 1), with
+    # no "Rei:" status flash; OFF turns it back off
+    if "USAGE_ON" in line or "USAGE_OFF" in line:
+        on = "USAGE_ON" in line
+        emit({"type": "limits", "limits": {"main": 0, "head": "5h 31%", "bar": 1 if on else 0, "note": "", "at": 0,
+              "windows": [{"name": "5h", "pct": 31, "reset": 0}, {"name": "week", "pct": 5, "reset": 0}]}})
+        emit({"type": "message", "role": "ai", "text": "USAGE_SENT_" + ("ON" if on else "OFF")})
+        emit({"type": "done", "turn": 1})
+        continue
     if "QUEUED_LINE" in line:
         emit({"type": "message", "role": "ai", "text": "QUEUED_SENT"})
         emit({"type": "done", "turn": 1})

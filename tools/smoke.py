@@ -62,6 +62,7 @@ class Run:
                 except OSError: return False
                 if not data: return False
                 self.clears = getattr(self, "clears", 0) + data.count(b"\x1b[2J")
+                self.raw = getattr(self, "raw", b"") + data
                 self.stream.feed(data)
         return True
     def keys(self, s, gap=0.05):
@@ -104,6 +105,7 @@ def main():
 
     print("1  edit, save, undo")
     r = Run("a.txt"); r.wait_for('"a.txt"', 10); r.pump(0.3)
+    check(b"\x1b[2 q" in getattr(r, "raw", b""), "the cursor has its shape from the start, before any key (iSh drew none until i, esc)", r)
     r.keys("ihello world\x1b"); r.cmd("w")
     check(read("a.txt") == "hello world\n", "save writes the buffer", r)
     r.keys("ddu"); r.pump(0.3)
@@ -161,6 +163,12 @@ def main():
     r.keys("isteer this way\x14"); r.pump(0.3)
     check(r.wait_for("LONG_DONE", 4) and "steer this way" in r.text(), "ctrl-t mid-turn steers the running turn", r)
     check(r.wait_for("QUEUED_SENT", 4), "and the queued line goes when the turn ends", r)
+    # 11-23: the plan's fullest limit in Rei's header, as code's bar has it with :usage bar
+    r.keys("\x1b"); r.keys("iUSAGE_ON\x1b"); r.keys("\r"); r.pump(0.3)
+    check(r.wait_for("USAGE_SENT_ON", 4) and "5h 31%" in r.text() and "Rei: fake" not in r.text(),
+          "hako's limits put the plan's usage in Rei's header, with no status flash", r)
+    r.keys("iUSAGE_OFF\x1b"); r.keys("\r"); r.pump(0.3)
+    check(r.wait_for("USAGE_SENT_OFF", 4) and "5h 31%" not in r.text(), "and take it away when hako's bar has it off", r)
     r.keys("\x1b"); r.pump(0.2)
     r.cmd("rei"); r.pump(0.3)
 
