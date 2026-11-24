@@ -563,6 +563,7 @@ struct editorConfig {
 	int hako_protocol;
 	char hako_session_name[64];
 	int hako_remote;
+	char hako_usage[48];      /* the plan's fullest limit ("5h 31%"), when hako's usage_bar is on */
 
 	int auto_indent;
 	int smart_indent;
@@ -649,6 +650,7 @@ void editorSelectSyntaxHighlight(void);
 char *editorRowsToString(int *buflen);
 int editorGetIndent(erow *row);
 void editorSetMode(enum editorMode mode);
+static void hkCursorShapeNow(void);
 void editorColonCommand(void);
 static void editorRunColon(char *cmd);
 static void hkOpenPath(const char *path);
@@ -2179,6 +2181,7 @@ void enableRawMode() {
 	SetConsoleMode(hStdout, out_mode);
 
 	if (write(STDOUT_FILENO, "\x1b[?1049h", 8) < 0) {}
+	hkCursorShapeNow();   /* a terminal's own default can be no cursor at all (iSh): the mode's shape from the start */
 	if (write(STDOUT_FILENO, "\x1b[2J", 4) < 0) {}
 	if (write(STDOUT_FILENO, "\x1b[H", 3) < 0) {}
 	if (write(STDOUT_FILENO, "\x1b[?2004h", 8) < 0) {}
@@ -2276,6 +2279,7 @@ void enableRawMode() {
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 
 	if (write(STDOUT_FILENO, "\x1b[?1049h", 8) < 0) {}
+	hkCursorShapeNow();   /* a terminal's own default can be no cursor at all (iSh): the mode's shape from the start */
 	if (write(STDOUT_FILENO, "\x1b[2J", 4) < 0) {}
 	if (write(STDOUT_FILENO, "\x1b[H", 3) < 0) {}
 	if (write(STDOUT_FILENO, "\x1b[?2004h", 8) < 0) {}
@@ -5285,6 +5289,11 @@ void editorHandleScroll(int direction) {
 }
 
 /*** mode and commands ***/
+static void hkCursorShapeNow(void) {
+	const char *seq = E.keymode == HK_KEYS_VIM && E.mode == MODE_INSERT ? "\x1b[6 q" : "\x1b[2 q";
+	if (write(STDOUT_FILENO, seq, 5) < 0) {}
+}
+
 void editorSetMode(enum editorMode mode) {
 	E.mode = mode;
 	const char *cursor_seq = NULL;
@@ -9931,7 +9940,11 @@ void aiRender(editorPane *pane, struct abuf *ab) {
 				if (cf.r < 0 || cb.r < 0) { cf = E.theme.keyword1; cf.a |= HK_A_REV; cb = E.theme.bg; }
 				used += 1 + gridPutStr(gx + 2 + used, gy, chip, max - used - 1, cf, cb);
 			}
-			if (E.hako_remote && used + 8 < max) gridPutStr(gx + 2 + used, gy, " remote", max - used - 1, E.theme.string, hb);
+			if (E.hako_remote && used + 8 < max) used += 1 + gridPutStr(gx + 2 + used, gy, " remote", max - used - 1, E.theme.string, hb);
+			if (E.hako_usage[0]) {            /* right-aligned, as code's bar has it */
+				int uw = (int)strlen(E.hako_usage) + 1;
+				if (used + uw + 2 < max) gridPutStr(gx + 1 + max - uw, gy, E.hako_usage, uw, hf, hb);
+			}
 		} else if (y == 1 || y == history_end + 1) {
 			int used = 0;
 			while (used < pane->width - 1) {
@@ -10242,6 +10255,18 @@ static void hkReiSessionFields(const char *line) {
 	}
 	const char *r = strstr(line, "\"remote\":");
 	if (r) E.hako_remote = !strncmp(r + 9, "true", 4) || r[9] == '1';
+	/* the plan's usage: shown in the header only when hako's bar shows it (:usage bar) */
+	const char *l = strstr(line, "\"limits\":");
+	if (l) {
+		E.hako_usage[0] = '\0';
+		char *h = strncmp(l + 9, "null", 4) && hkExtractJsonInt(l, "bar") == 1 ? hkExtractJsonString(l, "head") : NULL;
+		if (h) {
+			char *u = hkJsonUnescapeDup(h);
+			snprintf(E.hako_usage, sizeof(E.hako_usage), "%s", u ? u : h);
+			free(u);
+			free(h);
+		}
+	}
 }
 
 static void hakoHandleEvent(aiData *data, const char *line) {
@@ -10278,6 +10303,9 @@ static void hakoHandleEvent(aiData *data, const char *line) {
 		free(provider);
 		free(model);
 		free(version);
+
+	} else if (strcmp(type, "limits") == 0) {
+		hkReiSessionFields(line);          /* new numbers after a call: the header, no status flash */
 
 	} else if (strcmp(type, "state") == 0) {
 		/* A menu pick in hako says nothing in the chat; it lands here, in the status line. */
